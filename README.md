@@ -1,15 +1,41 @@
-# vial-web
+# Vialtic
 
-## Building
+Vial-based agentic software for configuring your keyboard.
 
-```
-git clone https://github.com/vial-kb/vial-web.git
-cd vial-web
-git clone https://github.com/vial-kb/vial-gui.git
-git clone https://github.com/vial-kb/via-keymap-precompiled.git
-./fetch-emsdk.sh
-./fetch-deps.sh
-./build-deps.sh
-cd src
-./build.sh
-```
+> [!IMPORTANT]
+> To start modifying this repository, give its URL to your agent and ask it to read it:
+> **https://github.com/AugustoCarmona/vialtic**
+>
+> The agent should read [`AGENTS.md`](AGENTS.md), follow its reading order, and use the specification and project status to collaborate with you. Agents with repository-reading and local execution capabilities can work directly; other clients may require you to provide files or enable local tools.
+
+This idea was born on Friday, October 30, after an extreme day of work. To clear my head a little, I had two pieces of toast as an afternoon snack and started configuring my new Omarchy. It turns out my Corne keyboard has trouble accessing the numbered workspaces, so I started configuring it through Vial. But with Codex open on my main screen, I realized it would be much easier to simply ask my agent. That is how this project was born. If you are using it, I hope you enjoy it. And if you are going to contribute, I hope you enjoy it too. A big hug. acp.
+
+## Project status
+
+**Specification complete; Vialtic implementation has not started.** No Vialtic installer, executable, release, or MCP server is available yet. The existing source and build scripts belong to upstream Vial Web and do not implement the product described here.
+
+Vialtic will let your existing agent inspect and configure USB-connected Vial keyboards. It will show proposed changes, wait for your approval, save the previous configuration, apply changes, and verify the result. Terminal agents receive text views; clients that support images can show a keyboard image in the conversation.
+
+The first release targets Linux x86_64 and macOS Apple Silicon. Vialtic runs locally without accounts, telemetry, a hosted model, API keys, or configuration uploads. Your chosen agent has its own data-processing behavior.
+
+## Start contributing
+
+Give your agent the repository URL and ask:
+
+> Read AGENTS.md and implement the next incomplete milestone in docs/PLAN.md, following docs/SPEC.md. Update docs/STATUS.md with the result and verification evidence.
+
+For installation after releases exist, the same repository will direct agents to [`docs/INSTALL.md`](docs/INSTALL.md). Downloading the source alone does not install Vialtic. There is no one-click installation claim for clients without local execution access.
+
+## Documentation
+
+- [Agent instructions](AGENTS.md)
+- [Complete product and engineering specification](docs/SPEC.md)
+- [Implementation plan and acceptance criteria](docs/PLAN.md)
+- [Current state and handoff](docs/STATUS.md)
+- [Installation contract](docs/INSTALL.md)
+- [Windows implementation guide](docs/WINDOWS.md)
+- [Upstream reuse and attribution](docs/UPSTREAM.md)
+
+## Freedom and attribution
+
+New Vialtic code will use GPL-2.0-or-later. Preserve upstream notices and licenses for all reused material. Vialtic is based on [Vial](https://github.com/vial-kb/vial-gui); this checkout originated from [Vial Web](https://github.com/vial-kb/vial-web). See [COPYING](COPYING) and [upstream provenance](docs/UPSTREAM.md).
