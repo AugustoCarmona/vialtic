@@ -60,12 +60,16 @@ def _ensure_dir(path: pathlib.Path) -> pathlib.Path:
     return path
 
 
-def atomic_write(path: pathlib.Path, data: bytes) -> None:
-    """Write durably: temp file in the same directory, fsync, rename, fsync directory."""
+def atomic_write(path: pathlib.Path, data: bytes, own_directory: bool = True) -> None:
+    """Write durably: temp file in the same directory, fsync, rename, fsync directory.
+
+    `own_directory` is false for paths a user chose, where a similarly named file is theirs.
+    """
     _ensure_dir(path.parent)
     # A process killed mid-write leaves its temp file, possibly a full snapshot, behind.
-    for stale in path.parent.glob(f".{path.name}.*"):
-        stale.unlink(missing_ok=True)
+    if own_directory:
+        for stale in path.parent.glob(f".{path.name}.*"):
+            stale.unlink(missing_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "wb") as out:
@@ -173,7 +177,7 @@ class Store:
         for path in directory.glob("*.json"):
             try:
                 proposal = Proposal.model_validate_json(path.read_bytes())
-                if proposal.expires_at <= now:
+                if proposal.created_at.tzinfo is None or proposal.expires_at.tzinfo is None or proposal.expires_at <= now:
                     path.unlink()
                 else:
                     remaining.append((proposal.created_at, path))
@@ -241,12 +245,20 @@ class Store:
 
     def settle_finished_write(self, binding_id: str) -> None:
         """Finish rotation for a write that verified but crashed before cleaning up. No device access."""
+        # The baseline only goes away once its write is resolved, so a journal without one is a leftover.
+        if self.journal_path(binding_id).exists() and not self.pending_path(binding_id).exists():
+            with contextlib.suppress(OSError):
+                self.clear_journal(binding_id)
+            return
         try:
             journal = self.read_journal(binding_id)
+            if journal is None or journal.status != "verified":
+                return
+            # A damaged baseline must not replace a good previous.json.
+            if journal.proposal_type != "recovery":
+                self.read_snapshot(self.pending_path(binding_id))
         except VialticError:
             return  # Unreadable metadata stays pending; `recover plan` can still resolve it.
-        if journal is None or journal.status != "verified":
-            return
         self.finish_write(binding_id, journal.proposal_type)
 
     def finish_write(self, binding_id: str, proposal_type: str) -> None:
@@ -261,17 +273,23 @@ class Store:
     def has_unresolved_write(self, binding_id: str) -> bool:
         return self.journal_path(binding_id).exists() or self.pending_path(binding_id).exists()
 
-    def set_unlock_marker(self, binding_id: str, proposal_id: str) -> None:
-        """Remember that Vialtic unlocked this keyboard, and for which proposal."""
-        atomic_write(self.unlock_marker_path(binding_id), json.dumps({"proposal_id": proposal_id}).encode())
+    def set_unlock_marker(self, binding_id: str, proposal_id: str, path: str | None = None) -> None:
+        """Remember that Vialtic unlocked this keyboard, for which proposal and at which USB path."""
+        atomic_write(self.unlock_marker_path(binding_id), json.dumps({"proposal_id": proposal_id, "path": path}).encode())
 
-    def clear_unlock_marker(self, binding_id: str) -> None:
+    def clear_unlock_marker(self, binding_id: str, path: str | None = None) -> None:
+        """An identical keyboard shares the binding, so with a path this only clears that unit's marker."""
+        if path is not None and self.read_unlock_marker(binding_id, path) is None:
+            return
         with contextlib.suppress(FileNotFoundError):
             self.unlock_marker_path(binding_id).unlink()
 
-    def read_unlock_marker(self, binding_id: str) -> str | None:
+    def read_unlock_marker(self, binding_id: str, path: str | None = None) -> str | None:
         try:
-            return json.loads(self.unlock_marker_path(binding_id).read_text()).get("proposal_id", "")
+            marker = json.loads(self.unlock_marker_path(binding_id).read_text())
+            if path is not None and marker.get("path") not in (None, path):
+                return None
+            return marker.get("proposal_id", "")
         except FileNotFoundError:
             return None
         except (OSError, ValueError, AttributeError):

@@ -33,9 +33,10 @@ READ_COMMANDS = {
     proto.CMD_VIA_MACRO_GET_COUNT, proto.CMD_VIA_MACRO_GET_BUFFER_SIZE, proto.CMD_VIA_MACRO_GET_BUFFER,
     proto.CMD_VIA_GET_LAYER_COUNT, proto.CMD_VIA_KEYMAP_GET_BUFFER,
 }
-WRITE_COMMANDS = {
-    proto.CMD_VIA_SET_KEYBOARD_VALUE, proto.CMD_VIA_SET_KEYCODE, proto.CMD_VIA_LIGHTING_SET_VALUE,
-    proto.CMD_VIA_LIGHTING_SAVE, proto.CMD_VIA_MACRO_SET_BUFFER,
+WRITE_COMMANDS = {proto.CMD_VIA_SET_KEYCODE, proto.CMD_VIA_LIGHTING_SAVE, proto.CMD_VIA_MACRO_SET_BUFFER}
+LIGHTING_WRITES = {
+    proto.QMK_BACKLIGHT_BRIGHTNESS, proto.QMK_BACKLIGHT_EFFECT, proto.QMK_RGBLIGHT_BRIGHTNESS, proto.QMK_RGBLIGHT_EFFECT,
+    proto.QMK_RGBLIGHT_EFFECT_SPEED, proto.QMK_RGBLIGHT_COLOR, proto.VIALRGB_SET_MODE,
 }
 VIAL_READ = {
     proto.CMD_VIAL_GET_KEYBOARD_ID, proto.CMD_VIAL_GET_SIZE, proto.CMD_VIAL_GET_DEFINITION, proto.CMD_VIAL_GET_ENCODER,
@@ -60,6 +61,11 @@ def classify_packet(msg: bytes) -> str:
     if cmd == proto.CMD_VIA_GET_KEYBOARD_VALUE:
         # Live switch state is out of scope (no keypress monitoring).
         return "read" if sub == proto.VIA_LAYOUT_OPTIONS else "deny"
+    if cmd == proto.CMD_VIA_SET_KEYBOARD_VALUE:
+        # The same command also carries firmware-defined values; only layout options are configuration.
+        return "write" if sub == proto.VIA_LAYOUT_OPTIONS else "deny"
+    if cmd == proto.CMD_VIA_LIGHTING_SET_VALUE:
+        return "write" if sub in LIGHTING_WRITES else "deny"
     if cmd in READ_COMMANDS:
         return "read"
     if cmd in WRITE_COMMANDS:
@@ -80,6 +86,12 @@ def classify_packet(msg: bytes) -> str:
     return "deny"
 
 
+# Every write sets an absolute value, so repeating one is harmless; upstream sends some with no retries.
+WRITE_RETRIES = 20
+# Far more than the largest legitimate reads, so firmware that answers nonsense cannot loop forever.
+MAX_READS_PER_SESSION = 100_000
+
+
 class GuardedTransport:
     """usb_send replacement for upstream Keyboard. Writes need an explicitly opened gate."""
 
@@ -96,9 +108,14 @@ class GuardedTransport:
                 (kind == "security" and not self._security_open):
             raise VialticError("write_blocked", f"Refused to send {kind} packet 0x{msg[:3].hex()}: gate closed.",
                                details={"packet_prefix": msg[:3].hex(), "class": kind})
+        if kind == "write":
+            retries = max(retries, WRITE_RETRIES)
         if self._max_retries is not None:
             retries = min(retries, self._max_retries)
         self.packets[kind] += 1
+        if kind == "read" and self.packets[kind] > MAX_READS_PER_SESSION:
+            raise VialticError("malformed_device_data", "The keyboard keeps answering without finishing a read, so Vialtic stopped.",
+                               next_steps=["Replug the keyboard and retry; report this firmware if it persists."])
         return self._send(dev, msg, retries=retries)
 
     @contextlib.contextmanager
@@ -176,7 +193,7 @@ def sha256_json(value: Any) -> str:
 
 def _display_name(desc: dict[str, Any]) -> str:
     name = f"{desc.get('manufacturer_string') or ''} {desc.get('product_string') or ''}".strip()
-    return name or f"{desc['vendor_id']:04x}:{desc['product_id']:04x}"
+    return va.printable(name) or f"{desc['vendor_id']:04x}:{desc['product_id']:04x}"
 
 
 def base_identity(desc: dict[str, Any], simulated: bool) -> DeviceIdentity:
@@ -254,7 +271,11 @@ class Session:
         warnings = []
         if config.settings.unknown_qsids:
             warnings.append(f"QMK settings {config.settings.unknown_qsids} are exposed by the firmware but unknown to "
-                            "the pinned Vial tables; they are not read or backed up.")
+                            "the pinned Vial tables. Their raw answers are kept with the backup, but Vialtic never writes "
+                            "them, so it cannot restore them if something else changes them.")
+        if config.settings.unreadable_qsids:
+            warnings.append(f"The firmware refused to report QMK settings {config.settings.unreadable_qsids}, so they are "
+                            "not backed up and cannot be changed.")
         return Snapshot(
             created_at=now or datetime.now(timezone.utc), device=self.identity,
             capabilities=va.capabilities_of(self.kb), layout=va.layout_of(self.kb), configuration=config,
@@ -263,6 +284,8 @@ class Session:
 
 def family_fingerprints(config) -> dict[str, str]:
     data = config.model_dump(mode="json")
+    # Opaque answers of unknown width may carry bytes that are not part of the value.
+    data["settings"].pop("unknown_raw", None)
     return {family: sha256_json(data[family]) for family in va.ALL_FAMILIES}
 
 
@@ -342,8 +365,8 @@ class DeviceManager:
                     raise
                 return DeviceEntry(identity=complete_identity(base, kb), status="ready")
         except VialticError as exc:
-            status = {"permission_denied": "permission_denied", "device_busy": "busy", "lock_timeout": "busy"}.get(
-                exc.code, "error")
+            status = {"permission_denied": "permission_denied", "device_busy": "busy", "lock_timeout": "busy",
+                      "unlock_in_progress": "busy"}.get(exc.code, "error")
             return DeviceEntry(identity=base, status=status, problem=problem_info(exc))
 
     def list_devices(self) -> tuple[list[DeviceEntry], list[IgnoredInterface], dict[str, dict[str, Any]]]:
@@ -370,6 +393,33 @@ class DeviceManager:
                                details={"candidates": [e.model_dump(mode="json") for e in entries]},
                                next_steps=["Ask the user which keyboard to use, then pass --device <device_id>."])
         return self._usable(entries[0]), by_id[entries[0].identity.device_id], entries
+
+    def select_interface(self, selector: str | None) -> dict[str, Any]:
+        """Selection that talks to no keyboard, for the commands that must work during an unlock."""
+        candidates, _ = self.interfaces()
+        if selector:
+            for desc in candidates:
+                if selector in (device_id_for(desc), _path_text(desc["path"])):
+                    return desc
+            raise VialticError("device_not_found", f"No connected keyboard matches {selector!r}.",
+                               next_steps=["Run `vialtic devices list`; device ids change when a keyboard is replugged."])
+        if not candidates:
+            raise VialticError("no_device", "No USB Vial keyboard was found.", next_steps=["Connect the keyboard by USB."])
+        if len(candidates) > 1:
+            raise VialticError("device_selection_required", f"{len(candidates)} keyboards are connected. Choose one.",
+                               next_steps=["Ask the user which keyboard to use, then pass --device <device_id>."])
+        return candidates[0]
+
+    @contextlib.contextmanager
+    def security_session(self, desc: dict[str, Any]) -> Iterator[Session]:
+        """Opens a keyboard without reading its configuration, which an unlock in progress does not allow."""
+        with va.CONTEXT_LOCK, self._opened(desc) as (kb, transport, handle):
+            try:
+                data = kb.usb_send(handle, struct.pack("BB", proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_GET_KEYBOARD_ID), retries=20)
+                kb.vial_protocol, kb.keyboard_id = struct.unpack("<IQ", data[0:12])
+            except RuntimeError as exc:
+                raise VialticError("device_communication_failed", f"The keyboard stopped responding: {exc}") from exc
+            yield Session(handle, kb, transport, base_identity(desc, self.backend.simulated))
 
     @staticmethod
     def _usable(entry: DeviceEntry) -> DeviceEntry:

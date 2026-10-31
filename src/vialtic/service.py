@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import platform
+import struct
 import sys
 import time
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from .device import Backend, DeviceManager, Session
 from .errors import VialticError
 from .models import (
     ApplyResult, ApprovalAttestation, ChangeSet, DeviceEntry, DeviceIdentity, DeviceList, DoctorCheck, DoctorReport,
+    FollowingWrite,
     InspectResult, Journal, KeycodeList, Operation, OperationResult, Proposal, ProposalType, Snapshot, UnlockPosition,
     UnlockStatus, VerificationDifference, VersionInfo, ViewResult,
 )
@@ -34,6 +36,11 @@ class ServiceOptions:
     progress: Callable[[str], None] = lambda message: None
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     sleep: Callable[[float], None] = time.sleep
+
+
+# What a failing keyboard, or a damaged stored value, can raise from upstream's setters and readers.
+WRITE_ERRORS = (RuntimeError, OSError, VialticError, va.UnlockRequired, struct.error, ValueError, TypeError, AttributeError,
+                IndexError, KeyError, OverflowError, AssertionError)
 
 
 class _WriteFailure(Exception):
@@ -60,6 +67,8 @@ class _ApplyState:
     relock_error: str | None = None
     # Set once read-back passed. From then on the write stands and is never rolled back.
     committed: bool = False
+    # Whether the firmware may have received this write's lighting save.
+    save_attempted: bool = False
     # Families a recovery cannot restore and leaves as they were at planning time.
     skip_families: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -108,11 +117,11 @@ class VialticService:
 
     def _unlock_warnings(self, session: Session) -> list[str]:
         """Say so if Vialtic unlocked this keyboard and did not lock it again."""
-        binding = session.identity.binding_id
-        if self.store.read_unlock_marker(binding) is None:
+        binding, path = session.identity.binding_id, session.identity.path
+        if self.store.read_unlock_marker(binding, path) is None:
             return []
         if session.kb.get_unlock_status() != 1:
-            self.store.clear_unlock_marker(binding)
+            self.store.clear_unlock_marker(binding, path)
             return []
         return ["Vialtic unlocked this keyboard and has not locked it again. Run `vialtic lock` or replug it."]
 
@@ -184,7 +193,7 @@ class VialticService:
                 if entry.identity.identity_confidence != "usb_serial":
                     checks.append(DoctorCheck(name=f"{name} identity", status="info", message=entry.identity.identity_note))
                 self.store.settle_finished_write(entry.identity.binding_id)
-                if self.store.read_unlock_marker(entry.identity.binding_id) is not None:
+                if self.store.read_unlock_marker(entry.identity.binding_id, entry.identity.path) is not None:
                     checks.append(DoctorCheck(name=f"{name} lock", status="warning",
                                               message="Vialtic unlocked this keyboard and may not have locked it again.",
                                               next_steps=["Run `vialtic lock` or replug the keyboard."]))
@@ -212,7 +221,7 @@ class VialticService:
         with self.devices.session(desc) as session:
             self._refuse_if_unresolved(session.identity)
             snapshot = session.snapshot(self.options.now())
-            operations, warnings = proposals.validate_changes(session, snapshot, changes)
+            operations, warnings = proposals.validate_changes(session, snapshot, changes.changes)
             if not operations:
                 raise VialticError("no_changes", "The keyboard already holds every requested value.",
                                    details={"notes": warnings})
@@ -228,7 +237,7 @@ class VialticService:
                 raise VialticError("nothing_to_undo", "No previous configuration is saved for this keyboard.")
             target = self.store.read_snapshot(path)
             snapshot = session.snapshot(self.options.now())
-            operations, notes = self._restore_plan(snapshot, target, "undo")
+            operations, notes = self._restore_plan(snapshot, target, "undo", selector, path, entries)
             if not operations:
                 raise VialticError("no_changes", "The keyboard already matches the previous configuration.")
             notes.append("After this undo, the configuration being replaced becomes the single previous state.")
@@ -254,38 +263,92 @@ class VialticService:
                                    next_steps=[f"Vialtic will not delete it. Inspect {path} or move it aside by hand "
                                                "to continue, then check the keyboard with `vialtic view`."]) from exc
             snapshot = session.snapshot(self.options.now())
-            operations, notes = self._restore_plan(snapshot, target, "recovery")
+            operations, notes = self._restore_plan(snapshot, target, "recovery", selector, path, entries, journal)
             if journal is not None:
                 notes.insert(0, f"Restores the state saved before proposal {journal.proposal_id}, which "
                                 f"finished {journal.completed_operations} of {journal.total_operations} operations.")
             return self._finish_proposal("recovery", session, entries, snapshot, operations, notes)
 
-    def _restore_plan(self, current: Snapshot, target: Snapshot, purpose: str) -> tuple[list[Operation], list[str]]:
+    def _restore_plan(self, current: Snapshot, target: Snapshot, purpose: str, selector: str | None, path,
+                      entries: list[DeviceEntry], journal: Journal | None = None) -> tuple[list[Operation], list[str]]:
+        way_out = (["Nothing was changed. Vialtic will not delete the saved state. Check the keyboard with `vialtic view`, "
+                    f"then move {path} aside by hand to continue."] if purpose == "recovery"
+                   else ["Create a new proposal for the changes you want."])
         if target.device.binding_id != current.device.binding_id:
-            raise VialticError("device_changed", "The saved configuration belongs to a different keyboard or firmware.")
-        operations, blockers, notes = proposals.restore_operations(current.configuration, target.configuration)
+            raise VialticError("device_changed", "The saved configuration belongs to a different keyboard or firmware.",
+                               next_steps=way_out)
+        # The binding does not cover firmware updates, and saved values mean something else across these boundaries.
+        if target.device.vial_protocol is None:
+            raise VialticError("invalid_file", f"The saved configuration at {path} does not say which protocol it was read from.",
+                               next_steps=[f"Vialtic will not delete it. Move {path} aside by hand to continue."])
+        if not va.same_encoding(target.device.vial_protocol, current.device.vial_protocol):
+            raise VialticError("device_changed", f"The saved configuration was read from Vial protocol "
+                                                 f"{target.device.vial_protocol} and this keyboard now reports "
+                                                 f"{current.device.vial_protocol}, which encodes keycodes or macros differently.",
+                               next_steps=way_out)
+        notes_for_unit = []
+        # Without a real serial, the backup may belong to an identical unit. Only a person can tell.
+        if target.device.path != current.device.path and current.device.identity_confidence != "usb_serial":
+            # Choosing a keyboard is mandatory with several connected, so it confirms nothing if the original path is taken.
+            other = next((e.identity.device_id for e in entries if e.identity.path == target.device.path
+                          and e.identity.binding_id == current.device.binding_id), None)
+            if other:
+                raise VialticError(
+                    "device_ambiguous",
+                    f"The saved configuration came from the keyboard at {target.device.path}, which is still connected. It "
+                    f"does not belong to the one at {current.device.path}. Nothing was changed.",
+                    details={"backup_path": target.device.path, "connected": other},
+                    next_steps=[f"Use --device {other}."])
+            if not selector:
+                raise VialticError(
+                    "device_ambiguous",
+                    f"The saved configuration came from a keyboard at {target.device.path} and this one is at "
+                    f"{current.device.path}. Identical keyboards cannot be told apart, so it may be a different unit.",
+                    details={"backup_path": target.device.path, "connected": current.device.device_id},
+                    next_steps=["Ask the user whether this is the same physical keyboard. If it is, pass "
+                                f"--device {current.device.device_id}."])
+            notes_for_unit.append(f"The saved configuration came from a keyboard at {target.device.path}, not "
+                                  f"{current.device.path}. It is applied here because this keyboard was selected explicitly.")
+        # Only what the reversed write changed: lighting can differ just because someone pressed a key.
+        following = target.followed_by
+        lighting_save, systems = None, []
+        if following and "lighting" in following.families:
+            systems = following.lighting_systems
+            lighting_save = (self._save_may_have_been_sent(current.device.binding_id, following) if purpose == "recovery"
+                             else following.lighting_saved)
+        try:
+            operations, blockers, notes = proposals.restore_operations(
+                current.configuration, target.configuration, current.device.vial_protocol, lighting_save, systems,
+                current.capabilities.layout_option_labels)
+        except VialticError:
+            raise
+        except Exception as exc:
+            raise VialticError("invalid_file", f"The saved configuration at {path} holds values that cannot be restored: "
+                                               f"{type(exc).__name__}.",
+                               next_steps=[f"Vialtic will not delete it. Move {path} aside by hand to continue."]) from exc
+        notes = notes_for_unit + notes
         if blockers and purpose == "recovery":
             # Refusing here would leave the keyboard unable to accept any new plan.
-            notes.append(f"{', '.join(blockers)} changed since the interrupted write. This build cannot write them, so "
-                         "they stay as they are now; only the keymap and encoders are restored.")
+            notes.append(f"The firmware no longer has the same entries for {', '.join(blockers)} as the saved state, so "
+                         "they cannot be restored and stay as they are now. Everything else is restored.")
         elif blockers:
             raise VialticError(
                 "restore_unsupported",
-                f"This {purpose} would need to restore {', '.join(blockers)}, and this build can only write the keymap "
-                "and encoders. Nothing was changed.",
-                details={"families": blockers}, next_steps=["Restore those features with Vial, or wait for milestone M3."])
+                f"This {purpose} would need to restore {', '.join(blockers)}, and the firmware no longer has the same "
+                "entries as the saved state. Nothing was changed.",
+                details={"families": blockers}, next_steps=["Inspect the keyboard and create a new proposal instead."])
         return operations, notes
 
     def _finish_proposal(self, proposal_type: ProposalType, session: Session, entries: list[DeviceEntry],
                          snapshot: Snapshot, operations: list[Operation], warnings: list[str]) -> Proposal:
-        warnings = list(warnings) + [w for w in snapshot.warnings if w not in warnings]
+        warnings = list(warnings) + [w for w in snapshot.warnings if w not in warnings] + self._unlock_warnings(session)
         if session.identity.identity_confidence != "usb_serial":
             warnings.append(session.identity.identity_note)
         if self._twins(session.identity, entries):
             warnings.append("Another connected keyboard reports this exact identity. Backups are stored per identity, "
                             "so they cannot be attributed to one of these units with certainty.")
         positions: list[tuple[int, int]] = []
-        if any(op.after.keycode == va.RESET_KEYCODE for op in operations):
+        if proposals.requires_unlock(operations):
             positions = [tuple(p) for p in session.kb.get_unlock_keys()]
         proposal = proposals.build_proposal(proposal_type, session.identity, snapshot, operations, warnings, positions,
                                             self.options.now(), self.options.proposal_ttl, self.options.reconnect_window)
@@ -341,6 +404,9 @@ class VialticService:
 
         binding = proposal.device.binding_id
         with self.store.binding_lock(binding, self.options.lock_timeout):
+            # Again under the lock: another process may have spent this proposal while this one waited.
+            proposal = self._load_proposal(proposal_id)
+            self._check_approval(proposal, attestation)
             self.store.settle_finished_write(binding)
             if proposal.proposal_type != "recovery" and self.store.has_unresolved_write(binding):
                 self._refuse_if_unresolved(proposal.device)
@@ -421,6 +487,8 @@ class VialticService:
         relock_required = False
         try:
             relock_required = self._unlock_marker_applies(session, proposal)
+            if not relock_required:
+                warnings = warnings + self._unlock_warnings(session)
             self._check_live_identity(session, proposal)
             self._check_baseline(session.snapshot(self.options.now()), proposal)
             unlocked_here = self._unlock_for(session, proposal)
@@ -431,11 +499,9 @@ class VialticService:
             self._check_not_expired(proposal)
             current = session.snapshot(self.options.now())
             self._check_baseline(current, proposal)
-            for op in proposal.operations:
-                if op.after.raw != va.Keycode.deserialize(op.after.keycode, reraise=True):
-                    raise VialticError("proposal_stale", "A keycode in this proposal resolves differently now.")
-            if session.kb.get_unlock_status() != 1 and not proposal.unlock.required and any(
-                    op.after.keycode == va.RESET_KEYCODE for op in proposal.operations):
+            proposals.check_stated_values(proposal, session.kb)
+            if session.kb.get_unlock_status() != 1 and not proposal.unlock.required and proposals.requires_unlock(
+                    proposal.operations):
                 raise VialticError("unlock_required", "This proposal needs a physical unlock it did not declare.")
             state = self._save_baseline(session, proposal, current, warnings)
             state.unlocked_here, state.relock_required = unlocked_here, relock_required
@@ -462,8 +528,8 @@ class VialticService:
         try:
             with session.transport.security():
                 session.kb.lock()
-            if session.kb.get_unlock_status() != 1:
-                self.store.clear_unlock_marker(binding)
+            if self._fully_locked(session):
+                self.store.clear_unlock_marker(binding, session.identity.path)
                 return
         except Exception:
             pass
@@ -473,35 +539,72 @@ class VialticService:
     def _unlock_marker_applies(self, session: Session, proposal: Proposal) -> bool:
         """Whether an unlock Vialtic performed earlier belongs to this operation."""
         binding = session.identity.binding_id
-        marker = self.store.read_unlock_marker(binding)
+        marker = self.store.read_unlock_marker(binding, session.identity.path)
         if marker is None:
             return False
         if session.kb.get_unlock_status() != 1:
-            self.store.clear_unlock_marker(binding)  # Replugging locks the firmware, so the marker is stale.
+            self.store.clear_unlock_marker(binding, session.identity.path)  # Replugging locks the firmware, so the marker is stale.
             return False
         # A recovery ends whatever operation unlocked it, which may not have left a journal.
         return marker == proposal.id or proposal.proposal_type == "recovery"
 
+    def _save_may_have_been_sent(self, binding: str, following) -> bool:
+        """An interrupted write may never have reached its save, which comes last."""
+        try:
+            journal = self.store.read_journal(binding)
+        except VialticError:
+            return bool(following and following.lighting_saved)  # Unreadable: assume it may have.
+        # The journal is written before any packet, so without one nothing was sent.
+        return journal.lighting_save_sent if journal else False
+
+    def _check_previous_readable(self, binding: str) -> None:
+        """A write ends by replacing previous.json, so one this build cannot read must stop it first."""
+        path = self.store.previous_path(binding)
+        if not path.exists():
+            return
+        try:
+            self.store.read_snapshot(path)
+        except VialticError as exc:
+            raise VialticError(exc.code, f"The saved previous configuration cannot be read, and this write would replace "
+                                         f"it: {exc.message} Nothing was written.", details=exc.details,
+                               next_steps=[f"Vialtic will not delete it. Move {path} aside by hand to continue, or use the "
+                                           "Vialtic version that wrote it."]) from exc
+
     def _save_baseline(self, session: Session, proposal: Proposal, current: Snapshot, warnings: list[str]) -> _ApplyState:
         binding = session.identity.binding_id
         skip: list[str] = []
+        save_sent = False
         if proposal.proposal_type == "recovery":
             pending = self.store.pending_path(binding)
             if not pending.exists():
                 raise VialticError("nothing_to_recover", "The recovery baseline no longer exists.")
             baseline = self.store.read_snapshot(pending)
-            skip = [family for family in va.CHECKED_FAMILIES if family not in va.RESTORABLE_FAMILIES
-                    and baseline.family_fingerprints[family] != proposal.baseline.family_fingerprints[family]]
+            following = baseline.followed_by
+            skip = proposals.restore_operations(current.configuration, baseline.configuration, lighting_systems=(
+                following.lighting_systems if following else ()))[1]
+            # A journal this write replaces must not forget that an earlier attempt may have saved lighting.
+            save_sent = self._save_may_have_been_sent(binding, following)
+            try:
+                interrupted = self.store.read_journal(binding)
+            except VialticError:
+                interrupted = None
+            if interrupted:
+                # It ran, so its approval is spent. A damaged id in the journal must not stop the recovery.
+                with contextlib.suppress(VialticError):
+                    self.store.delete_proposal(interrupted.proposal_id)
         else:
-            baseline = current
-            self.store.write_pending(binding, current)
+            self._check_previous_readable(binding)
+            baseline = current.model_copy(update={"followed_by": FollowingWrite(
+                families=proposal.affected, lighting_saved=proposals.saves_lighting(proposal.operations),
+                lighting_systems=proposals.touched_lighting_systems(proposal.operations))})
+            self.store.write_pending(binding, baseline)
         now = self.options.now()
         self.store.write_journal(Journal(
             proposal_id=proposal.id, proposal_type=proposal.proposal_type, binding_id=binding, device=session.identity,
             status="applying", total_operations=len(proposal.operations), completed_operations=0, started_at=now,
-            updated_at=now))
+            updated_at=now, lighting_save_sent=save_sent))
         return _ApplyState(proposal=proposal, baseline=baseline, live=session.identity, warnings=list(warnings),
-                           packets_before=session.transport.packets["write"], skip_families=skip)
+                           packets_before=session.transport.packets["write"], skip_families=skip, save_attempted=save_sent)
 
     def _unlock_for(self, session: Session, proposal: Proposal) -> bool:
         """Run the guided physical unlock when the proposal needs it. True if this call unlocked."""
@@ -513,7 +616,7 @@ class VialticService:
         self.options.progress("Hold these keys until the keyboard unlocks: "
                               + ", ".join(f"row {r} column {c}" for r, c in positions))
         # Written first: a crash from here on must not lose the fact that Vialtic unlocked it.
-        self.store.set_unlock_marker(binding, proposal.id)
+        self.store.set_unlock_marker(binding, proposal.id, session.identity.path)
         with session.transport.security():
             try:
                 kb.unlock_start()
@@ -527,8 +630,8 @@ class VialticService:
                     self.options.sleep(self.options.unlock_poll)
             except KeyboardInterrupt:
                 self._abort_unlock(session)
-                raise VialticError("cancelled", "Unlock cancelled. Nothing was written. Replug the keyboard if keys stop "
-                                                "responding.") from None
+                raise VialticError("cancelled", "Unlock cancelled. Nothing was written. Replug the keyboard: until then the "
+                                                "firmware waits for the unlock and ignores other commands.") from None
             except RuntimeError as exc:
                 self._abort_unlock(session)
                 raise VialticError("device_communication_failed", f"The keyboard stopped responding during unlock: {exc}. "
@@ -537,17 +640,22 @@ class VialticService:
             self._abort_unlock(session)
         raise VialticError("unlock_timeout", f"The keyboard was not unlocked within {self.options.unlock_timeout:g} seconds. "
                                              "Nothing was written.",
-                           next_steps=["Run apply again and hold the listed keys.",
-                                       "Replug the keyboard if keys stop responding."])
+                           next_steps=["Replug the keyboard: until then the firmware waits for the unlock and ignores other commands.",
+                                       "Then run apply again and hold the listed keys."])
 
     def _abort_unlock(self, session: Session) -> None:
-        """Best effort; the marker stays unless the keyboard confirms it is locked."""
+        """Best effort; the marker stays unless the keyboard confirms it is locked and not still waiting."""
         try:
             session.kb.lock()
-            if session.kb.get_unlock_status() != 1:
-                self.store.clear_unlock_marker(session.identity.binding_id)
+            if self._fully_locked(session):
+                self.store.clear_unlock_marker(session.identity.binding_id, session.identity.path)
         except Exception:
             pass
+
+    @staticmethod
+    def _fully_locked(session: Session) -> bool:
+        """Firmware ignores a lock during an unlock, which can still complete if someone polls it."""
+        return session.kb.get_unlock_status() != 1 and session.kb.get_unlock_in_progress() != 1
 
     def _write_and_verify(self, session: Session, state: _ApplyState) -> None:
         proposal = state.proposal
@@ -568,19 +676,33 @@ class VialticService:
             state.failed_index = None
             session.refresh()
             observed = session.snapshot(self.options.now())
-        except (RuntimeError, OSError, VialticError, va.UnlockRequired) as exc:
+            differences = self._differences(state, proposal.operations, observed)
+            if differences:
+                raise _WriteFailure(f"Read-back does not match the expected result in {len(differences)} place(s).", differences)
+            for op in proposal.operations:
+                if op.type == "set_macros" and va.read_macro_memory(session.kb) != va.writable_macro_bytes(
+                        va.decode_macro_buffer(op.after_buffer_b64), session.kb.macro_memory):
+                    raise _WriteFailure("The macro memory does not hold what was written.",
+                                        [VerificationDifference(family="macros", target="memory")])
+            # Last, so wrong values are never made persistent. The firmware does not confirm saves.
+            if proposals.saves_lighting(proposal.operations):
+                # Recorded first: from here on, a restore has saved values to put back too.
+                state.save_attempted = True
+                self.store.write_journal(journal.model_copy(update=dict(lighting_save_sent=True, updated_at=self.options.now())))
+                with session.transport.writes():
+                    session.kb.save_rgb()
+                state.warnings.append("Lighting values were verified and the save command was acknowledged. The firmware "
+                                      "cannot report whether they reached permanent storage.")
+        except WRITE_ERRORS as exc:
             message = exc.message if isinstance(exc, VialticError) else str(exc)
             raise _WriteFailure(f"The keyboard stopped responding during the write: {message}") from exc
         finally:
             state.packets_total = session.transport.packets["write"] - state.packets_before
-        differences = self._differences(state, proposal.operations, observed)
-        if differences:
-            raise _WriteFailure(f"Read-back does not match the expected result in {len(differences)} place(s).", differences)
 
     @staticmethod
     def _differences(state: _ApplyState, operations: list[Operation], observed: Snapshot) -> list[VerificationDifference]:
         differences = proposals.compare_state(state.baseline.configuration, operations, observed.configuration,
-                                              state.skip_families)
+                                              state.skip_families, proposals.touched_lighting_systems(state.proposal.operations))
         # Families a recovery leaves alone must at least not have moved since it was planned.
         expected = state.proposal.baseline.family_fingerprints
         differences += [VerificationDifference(family=family, target=family) for family in state.skip_families
@@ -589,12 +711,7 @@ class VialticService:
 
     @staticmethod
     def _write_operation(session: Session, op: Operation) -> None:
-        if op.type == "set_key":
-            session.kb.set_key(op.layer, op.row, op.col, op.after.keycode)
-        elif op.type == "set_encoder":
-            session.kb.set_encoder(op.layer, op.index, op.direction, op.after.keycode)
-        else:
-            raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
+        va.write_operation(session.kb, op)
 
     def _commit(self, state: _ApplyState) -> None:
         """Rotate the backup. Local failures here cannot undo what the keyboard verified."""
@@ -649,7 +766,7 @@ class VialticService:
         state.relocked = locked
         if locked:
             state.relock_error = None
-            self.store.clear_unlock_marker(state.proposal.device.binding_id)
+            self.store.clear_unlock_marker(state.proposal.device.binding_id, session.identity.path)
         else:
             state.relock_error = "The keyboard still reports unlocked. Run `vialtic lock` or replug it."
 
@@ -686,13 +803,16 @@ class VialticService:
         self._mark_needs_recovery(state, failure.message)
 
         restored, reason, last_observed = self._try_restore(state)
+        # The write ran, so its approval is spent, whatever the outcome.
+        self.store.delete_proposal(proposal.id)
         if restored:
             with contextlib.suppress(OSError):
                 self.store.discard_pending(binding)
                 self.store.clear_journal(binding)
             return ApplyResult(
                 proposal_id=proposal.id, binding_id=binding, device=state.live, outcome="failed_restored",
-                message=f"{failure.message} The saved state was restored and verified, so the keyboard is as it was before.",
+                message=f"{failure.message} The saved state was restored and verified, so the keyboard is as it was before"
+                        + self._lighting_exception(state, last_observed) + ".",
                 operations=self._operation_results(state), differences=failure.differences,
                 backup_path=self._existing(self.store.previous_path(binding)), write_packets_sent=state.packets_total,
                 relocked=state.relocked, relock_error=state.relock_error, warnings=state.warnings)
@@ -712,7 +832,21 @@ class VialticService:
             relocked=state.relocked, relock_error=state.relock_error, warnings=state.warnings,
             recovery_steps=["Reconnect the keyboard if needed and close other keyboard software.",
                             "Run `vialtic recover plan --json`, show the user the result and get approval.",
-                            "Run `vialtic apply <new-proposal-id> --user-approved`."])
+                            "Run `vialtic apply <new-proposal-id> --user-approved`.",
+                            f"If recovery keeps failing, check the keyboard with `vialtic view`, then move "
+                            f"{self.store.pending_path(binding)} aside by hand. Vialtic will not delete it."])
+
+    @staticmethod
+    def _lighting_exception(state: _ApplyState, observed: Snapshot | None) -> str:
+        baseline_light = state.baseline.configuration.lighting
+        if "vialrgb" in proposals.touched_lighting_systems(state.proposal.operations) and baseline_light.vialrgb \
+                and baseline_light.vialrgb["mode"] == 0:
+            return (", except that VialRGB is at mode 0, which turned the LEDs off if they were running an effect with no "
+                    "VialRGB id")
+        if observed is None or not proposals.compare_state(state.baseline.configuration, [], observed.configuration,
+                                                           lighting_systems=tuple(va.LIGHTING_FIELDS)):
+            return ""
+        return ", except lighting, where unsaved values are lost if the keyboard lost power and lighting keys may have changed it"
 
     def _mark_needs_recovery(self, state: _ApplyState, note: str) -> None:
         """A local failure here must not stop the restore that follows."""
@@ -733,7 +867,10 @@ class VialticService:
         """Restore the baseline within the reconnect window. Stops early on anything needing a person."""
         live = state.live
         target = state.baseline.configuration
-        deadline = time.monotonic() + state.proposal.reconnect_window_seconds
+        systems = proposals.touched_lighting_systems(state.proposal.operations)
+        # Saving only matters if the failed write may have saved; otherwise the saved values never moved.
+        must_save = state.save_attempted
+        deadline = time.monotonic() + min(state.proposal.reconnect_window_seconds, self.options.reconnect_window)
         last_observed: Snapshot | None = None
         reason = "the keyboard did not come back in time."
         while True:
@@ -760,12 +897,12 @@ class VialticService:
                         if proposals.unexplained_values(target, state.proposal.operations, last_observed.configuration):
                             return False, ("it holds values that neither the saved state nor this write explain, so it "
                                            "may be a different unit or another application changed it."), last_observed
-                        operations, blockers, _ = proposals.restore_operations(last_observed.configuration, target)
+                        operations, blockers, _ = proposals.restore_operations(
+                            last_observed.configuration, target, lighting_save=must_save, lighting_systems=systems)
                         blockers = [b for b in blockers if b not in state.skip_families]
                         if blockers:
                             return False, f"{', '.join(blockers)} changed and cannot be restored by this build.", last_observed
-                        needs_unlock = any(op.after.keycode == va.RESET_KEYCODE for op in operations)
-                        if needs_unlock and session.kb.get_unlock_status() != 1:
+                        if proposals.requires_unlock(operations) and session.kb.get_unlock_status() != 1:
                             return False, "restoring it requires a physical unlock.", last_observed
                         with session.transport.writes():
                             for op in operations:
@@ -775,10 +912,18 @@ class VialticService:
                         last_observed = session.snapshot(self.options.now())
                         remaining = self._differences(state, [], last_observed)
                         if not remaining:
+                            if must_save:
+                                with session.transport.writes():
+                                    session.kb.save_rgb()
+                                state.packets_total += 1
+                                must_save = False
+                                state.warnings.append("The failed write may have saved lighting, so the values read before "
+                                                      "it were saved. If those were themselves unsaved, the keyboard's saved "
+                                                      "lighting has changed; the firmware cannot report what it held before.")
                             self._relock(session, state)
                             return True, "", last_observed
                         reason = f"{len(remaining)} value(s) still differ after restoring."
-                except (VialticError, RuntimeError, OSError, va.UnlockRequired) as exc:
+                except WRITE_ERRORS as exc:
                     reason = f"{exc.message if isinstance(exc, VialticError) else exc}."
             if time.monotonic() >= deadline:
                 return False, reason, last_observed
@@ -787,8 +932,8 @@ class VialticService:
     # Security commands.
 
     def unlock_status(self, selector: str | None) -> UnlockStatus:
-        entry, desc, _ = self.devices.select(selector)
-        with self.devices.session(desc) as session:
+        # Reading the configuration is not possible during an unlock, and not needed here.
+        with self.devices.security_session(self.devices.select_interface(selector)) as session:
             return self._unlock_status(session)
 
     def unlock_start(self, proposal_id: str, attestation: ApprovalAttestation | None, selector: str | None) -> UnlockStatus:
@@ -804,14 +949,13 @@ class VialticService:
             status = self._unlock_status(session)
             if status.unlocked:
                 return status
-            self.store.set_unlock_marker(session.identity.binding_id, proposal.id)
+            self.store.set_unlock_marker(session.identity.binding_id, proposal.id, session.identity.path)
             with session.transport.security():
                 session.kb.unlock_start()
             return self._unlock_status(session)
 
     def unlock_poll(self, selector: str | None) -> UnlockStatus:
-        entry, desc, _ = self.devices.select(selector)
-        with self.devices.session(desc) as session:
+        with self.devices.security_session(self.devices.select_interface(selector)) as session:
             status = self._unlock_status(session)
             with session.transport.security():
                 data = session.kb.unlock_poll()
@@ -826,7 +970,7 @@ class VialticService:
                 session.kb.lock()
             status = self._unlock_status(session)
             if not status.unlocked:
-                self.store.clear_unlock_marker(session.identity.binding_id)
+                self.store.clear_unlock_marker(session.identity.binding_id, session.identity.path)
             return status
 
 

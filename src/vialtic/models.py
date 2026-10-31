@@ -159,6 +159,11 @@ class MacroState(Model):
 class SettingsState(Model):
     values: dict[str, int]
     unknown_qsids: list[int] = Field(default_factory=list)
+    # Exposed by the firmware and known to the table, but the firmware refused to report them.
+    unreadable_qsids: list[int] = Field(default_factory=list)
+    # What the firmware answers for unknown_qsids, as hex. Their width is unknown, so these
+    # can show that a value moved but can never be written back.
+    unknown_raw: dict[str, str] = Field(default_factory=dict)
 
 
 class LightingState(Model):
@@ -183,6 +188,15 @@ class Configuration(Model):
     lighting: LightingState
 
 
+class FollowingWrite(Model):
+    """What the write that used this snapshot as its backup changed. Undo needs it for lighting,
+    where a difference may just be someone pressing a lighting key."""
+
+    families: list[str] = Field(default_factory=list)
+    lighting_saved: bool = False
+    lighting_systems: list[str] = Field(default_factory=list)
+
+
 class Snapshot(Envelope):
     kind: Literal["snapshot"] = "snapshot"
     created_at: datetime
@@ -193,6 +207,7 @@ class Snapshot(Envelope):
     family_fingerprints: dict[str, str]
     coverage: dict[str, str]
     warnings: list[str] = Field(default_factory=list)
+    followed_by: FollowingWrite | None = None
 
 
 class InspectResult(Envelope):
@@ -221,7 +236,13 @@ class UnlockStatus(Envelope):
 
 # Requested changes (input).
 
-class SetKeyChange(Model):
+class ChangeModel(Model):
+    """Input from files: a boolean is not a number and text is not a layer."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+class SetKeyChange(ChangeModel):
     type: Literal["set_key"] = "set_key"
     layer: int
     row: int
@@ -229,7 +250,7 @@ class SetKeyChange(Model):
     keycode: str
 
 
-class SetEncoderChange(Model):
+class SetEncoderChange(ChangeModel):
     type: Literal["set_encoder"] = "set_encoder"
     layer: int
     index: int
@@ -237,7 +258,109 @@ class SetEncoderChange(Model):
     keycode: str
 
 
-Change = Annotated[Union[SetKeyChange, SetEncoderChange], Field(discriminator="type")]
+class SetLayoutOptionChange(ChangeModel):
+    """Choose one firmware-defined layout alternative. `index` is its position in the option list."""
+
+    type: Literal["set_layout_option"] = "set_layout_option"
+    index: int
+    choice: int
+
+
+class SetTapDanceChange(ChangeModel):
+    """Change one tap dance entry. Fields left out keep their current value."""
+
+    type: Literal["set_tap_dance"] = "set_tap_dance"
+    index: int
+    on_tap: str | None = None
+    on_hold: str | None = None
+    on_double_tap: str | None = None
+    on_tap_hold: str | None = None
+    tapping_term: int | None = None
+
+
+class SetComboChange(ChangeModel):
+    """Change one combo. `keys` lists up to four inputs and replaces all of them. Fields left out keep their value."""
+
+    type: Literal["set_combo"] = "set_combo"
+    index: int
+    keys: list[str] | None = Field(default=None, max_length=4)
+    output: str | None = None
+
+
+class SetKeyOverrideChange(ChangeModel):
+    """Change one key override. Fields left out keep their current value. Masks are integers:
+    `layers` has one bit per layer, modifier masks follow QMK's MOD_BIT layout, and `options`
+    holds the firmware flags, with bit 7 enabling the entry."""
+
+    type: Literal["set_key_override"] = "set_key_override"
+    index: int
+    trigger: str | None = None
+    replacement: str | None = None
+    layers: int | None = None
+    trigger_mods: int | None = None
+    negative_mod_mask: int | None = None
+    suppressed_mods: int | None = None
+    options: int | None = None
+
+
+class SetAltRepeatKeyChange(ChangeModel):
+    """Change one alternate repeat entry. Fields left out keep their current value.
+    In `options`, bit 3 enables the entry."""
+
+    type: Literal["set_alt_repeat_key"] = "set_alt_repeat_key"
+    index: int
+    keycode: str | None = None
+    alt_keycode: str | None = None
+    allowed_mods: int | None = None
+    options: int | None = None
+
+
+class SetQmkSettingChange(ChangeModel):
+    """Change one QMK setting: either the whole `value`, or one flag with `bit` and `enabled`."""
+
+    type: Literal["set_qmk_setting"] = "set_qmk_setting"
+    qsid: int
+    value: int | None = None
+    bit: int | None = None
+    enabled: bool | None = None
+
+
+class SetMacroChange(ChangeModel):
+    """Replace one macro. `actions` holds ["text", "abc"], ["tap", "KC_A", ...], ["down", ...],
+    ["up", ...] or ["delay", milliseconds]. An empty list clears the macro."""
+
+    type: Literal["set_macro"] = "set_macro"
+    index: int
+    actions: list[list[Any]] = Field(max_length=4096)
+
+
+LightingSystem = Literal["rgblight", "backlight", "vialrgb"]
+
+
+class SetLightingChange(ChangeModel):
+    """Change one lighting system. Fields left out keep their current value.
+
+    rgblight takes brightness, effect, effect_speed, hue, saturation. backlight takes brightness,
+    effect. vialrgb takes mode, speed, hue, saturation, value. `save` is required: true sends the
+    firmware's one save command, which persists all lighting; false lasts until the next power cycle.
+    """
+
+    type: Literal["set_lighting"] = "set_lighting"
+    system: LightingSystem
+    save: bool
+    brightness: int | None = None
+    effect: int | None = None
+    effect_speed: int | None = None
+    hue: int | None = None
+    saturation: int | None = None
+    mode: int | None = None
+    speed: int | None = None
+    value: int | None = None
+
+
+Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange, SetTapDanceChange, SetComboChange,
+                         SetKeyOverrideChange, SetAltRepeatKeyChange, SetQmkSettingChange, SetMacroChange, SetLightingChange],
+                   Field(discriminator="type")]
 
 
 class ChangeSet(Envelope):
@@ -265,7 +388,116 @@ class SetEncoderOperation(Model):
     after: KeycodeValue
 
 
-Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation], Field(discriminator="type")]
+class SetLayoutOptionsOperation(Model):
+    type: Literal["set_layout_options"] = "set_layout_options"
+    before: int
+    after: int
+    before_choices: list[int] = Field(default_factory=list)
+    after_choices: list[int] = Field(default_factory=list)
+
+
+class TapDanceValue(Model):
+    on_tap: KeycodeValue
+    on_hold: KeycodeValue
+    on_double_tap: KeycodeValue
+    on_tap_hold: KeycodeValue
+    tapping_term: int
+
+
+class SetTapDanceOperation(Model):
+    type: Literal["set_tap_dance"] = "set_tap_dance"
+    index: int
+    before: TapDanceValue
+    after: TapDanceValue
+
+
+class ComboValue(Model):
+    keys: list[KeycodeValue]
+    output: KeycodeValue
+
+
+class SetComboOperation(Model):
+    type: Literal["set_combo"] = "set_combo"
+    index: int
+    before: ComboValue
+    after: ComboValue
+
+
+class KeyOverrideValue(Model):
+    trigger: KeycodeValue
+    replacement: KeycodeValue
+    layers: int
+    trigger_mods: int
+    negative_mod_mask: int
+    suppressed_mods: int
+    options: int
+
+
+class SetKeyOverrideOperation(Model):
+    type: Literal["set_key_override"] = "set_key_override"
+    index: int
+    before: KeyOverrideValue
+    after: KeyOverrideValue
+
+
+class AltRepeatKeyValue(Model):
+    keycode: KeycodeValue
+    alt_keycode: KeycodeValue
+    allowed_mods: int
+    options: int
+
+
+class SetAltRepeatKeyOperation(Model):
+    type: Literal["set_alt_repeat_key"] = "set_alt_repeat_key"
+    index: int
+    before: AltRepeatKeyValue
+    after: AltRepeatKeyValue
+
+
+class SetQmkSettingOperation(Model):
+    type: Literal["set_qmk_setting"] = "set_qmk_setting"
+    qsid: int
+    title: str
+    before: int
+    after: int
+
+
+class MacroChangeSummary(Model):
+    """One macro the buffer write changes. `before` and `after` are a parsed preview for people;
+    they can hide malformed bytes, and the buffers below are what is written."""
+
+    index: int
+    before_bytes: int
+    after_bytes: int
+    before: list[list[Any]] | None = None
+    after: list[list[Any]] | None = None
+
+
+class SetMacrosOperation(Model):
+    """Macros are one firmware buffer, written whole. Contents are removed from default output."""
+
+    type: Literal["set_macros"] = "set_macros"
+    changed: list[MacroChangeSummary]
+    memory_bytes: int
+    before_used_bytes: int
+    after_used_bytes: int
+    before_buffer_b64: str | None = None
+    after_buffer_b64: str | None = None
+    redacted: bool = False
+
+
+class SetLightingOperation(Model):
+    type: Literal["set_lighting"] = "set_lighting"
+    system: LightingSystem
+    before: dict[str, int]
+    after: dict[str, int]
+    save: bool
+
+
+Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation, SetLayoutOptionsOperation, SetTapDanceOperation,
+                            SetComboOperation, SetKeyOverrideOperation, SetAltRepeatKeyOperation, SetQmkSettingOperation,
+                            SetMacrosOperation, SetLightingOperation],
+                      Field(discriminator="type")]
 
 
 class Baseline(Model):
@@ -359,6 +591,7 @@ class Journal(Envelope):
     started_at: datetime
     updated_at: datetime
     note: str = ""
+    lighting_save_sent: bool = False
 
 
 # Diagnostics.

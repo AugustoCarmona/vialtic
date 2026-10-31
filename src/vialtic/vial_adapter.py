@@ -20,8 +20,8 @@ import threading
 
 from .errors import VialticError
 from .models import (
-    Capabilities, Configuration, EncoderEntry, KeyGeometry, KeycodeInfo, KeycodeValue, KeymapEntry,
-    LayoutGeometry, LightingState, MacroState, SettingsState,
+    AltRepeatKeyValue, Capabilities, ComboValue, Configuration, KeyOverrideValue, EncoderEntry, KeyGeometry, KeycodeInfo, KeycodeValue, KeymapEntry,
+    LayoutGeometry, LightingState, MacroState, SettingsState, TapDanceValue,
 )
 
 VIAL_GUI_REVISION = "aef8222a2d0429a183b2ed692d5f9efcfd383f08"
@@ -51,7 +51,11 @@ from keycodes import keycodes as keycode_tables  # noqa: E402
 from keycodes.keycodes import RESET_KEYCODE, Keycode, recreate_keyboard_keycodes  # noqa: E402
 from any_keycode import AnyKeycode, functions as ANY_KEYCODE_FUNCTIONS  # noqa: E402
 from editor.qmk_settings import QmkSettings  # noqa: E402
+from macro.macro_action import ActionDelay, ActionDown, ActionTap, ActionText, ActionUp  # noqa: E402
 from protocol import constants as proto  # noqa: E402
+from protocol.alt_repeat_key import AltRepeatKeyEntry  # noqa: E402
+from protocol.key_override import KeyOverrideEntry  # noqa: E402
+from protocol.macro import macro_deserialize_v1, macro_deserialize_v2  # noqa: E402
 from protocol.keyboard_comm import (  # noqa: E402
     SUPPORTED_VIA_PROTOCOL, SUPPORTED_VIAL_PROTOCOL, Keyboard, ProtocolError,
 )
@@ -61,7 +65,7 @@ from util import MSG_LEN, VIAL_SERIAL_NUMBER_MAGIC, VIBL_SERIAL_NUMBER_MAGIC, hi
 __all__ = [
     "CONTEXT_LOCK", "HeadlessKeyboard", "MSG_LEN", "ProtocolError", "RESET_KEYCODE", "SUPPORTED_VIAL_PROTOCOL",
     "SUPPORTED_VIA_PROTOCOL", "UnlockRequired", "VIAL_SERIAL_NUMBER_MAGIC", "VIBL_SERIAL_NUMBER_MAGIC", "hid_send",
-    "proto", "Keycode",
+    "proto", "Keycode", "QmkSettings",
 ]
 
 CONTEXT_LOCK = threading.RLock()
@@ -71,19 +75,18 @@ MAX_DEFINITION_JSON = 4 * 1024 * 1024
 MAX_KEYMAP_BYTES = 0xFFFF
 MAX_KEYCODE_TEXT = 64
 
-# Operations this build can validate, apply, verify and restore. The rest of
-# the configuration surface is read and backed up, and arrives with M3.
-WRITABLE_OPERATIONS = ["set_key", "set_encoder"]
-
-# Families compared against a proposal's baseline before writing. Lighting is
-# left out on purpose: lighting keys on the keyboard change it without any host
-# involved, and no operation in this build writes it.
+# Families compared against a proposal's baseline before writing. Lighting joins
+# them only in a proposal that changes it: lighting keys on the keyboard change it
+# without any host involved, and that must not invalidate an unrelated proposal.
 CHECKED_FAMILIES = [
     "keymap", "encoders", "layout_options", "macros", "tap_dance", "combos",
     "key_overrides", "alt_repeat_keys", "settings",
 ]
 ALL_FAMILIES = CHECKED_FAMILIES + ["lighting"]
-RESTORABLE_FAMILIES = {"keymap", "encoders"}
+RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options", "tap_dance", "combos", "key_overrides", "alt_repeat_keys",
+                       "settings", "macros", "lighting"}
+LIGHTING_FIELDS = {"rgblight": ("brightness", "effect", "effect_speed", "hue", "saturation"),
+                   "backlight": ("brightness", "effect"), "vialrgb": ("mode", "speed", "hue", "saturation", "value")}
 
 
 class HeadlessKeyboard(Keyboard):
@@ -91,6 +94,7 @@ class HeadlessKeyboard(Keyboard):
 
     def reload_layout(self, sideload_json=None):
         if sideload_json is None:
+            self._refuse_during_unlock()
             self.reload_via_protocol()
             data = self.usb_send(self.dev, struct.pack("BB", proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_GET_KEYBOARD_ID),
                                  retries=20)
@@ -100,6 +104,15 @@ class HeadlessKeyboard(Keyboard):
             sideload_json = self._fetch_definition()
         super().reload_layout(sideload_json)
         self.sideload = False
+
+    def _refuse_during_unlock(self):
+        """While an unlock runs the firmware echoes almost everything back, which reads as nonsense."""
+        data = self.usb_send(self.dev, struct.pack("BB", proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_GET_UNLOCK_STATUS), retries=20)
+        if data[0] in (0, 1) and data[1] == 1:
+            raise VialticError("unlock_in_progress", "A physical unlock is in progress, and until it ends the firmware ignores "
+                                                     "every other command, including lock.",
+                               next_steps=["Hold the unlock keys and run `vialtic unlock poll` until it finishes, or replug "
+                                           "the keyboard to abandon it."])
 
     def _fetch_definition(self):
         data = self.usb_send(self.dev, struct.pack("BB", proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_GET_SIZE), retries=20)
@@ -156,6 +169,11 @@ def activate(kb: Keyboard) -> None:
 
 # Display.
 
+def printable(text: str) -> str:
+    """Firmware supplies these strings, and they must not reach a terminal as control sequences."""
+    return "".join(ch if ch.isprintable() else "?" for ch in text)
+
+
 def display_label(keycode: str) -> str:
     """Short, ASCII-safe label. Transparent and disabled keys stay distinguishable."""
     if keycode == "KC_TRNS":
@@ -164,7 +182,7 @@ def display_label(keycode: str) -> str:
         return "XXX"
     if keycode.startswith("USER"):
         label = Keycode.label(keycode).replace("\n", " ")
-        if label.isascii():
+        if label.isascii() and label.isprintable():
             return label
     return keycode.replace("KC__", "KC_").replace("KC_", "")
 
@@ -235,11 +253,27 @@ def _literal_layers(tree: ast.AST, text: str) -> list[int]:
                 layers.append(int(match.group(1)))
             for index, arg in enumerate(node.args):
                 walk(arg, _MOD_ARGUMENT.get(name) == index)
+            _check_argument_limits(name, node, required, text)
         else:
             raise _invalid(text, f"unsupported syntax ({type(node).__name__})")
 
     walk(tree)
     return layers
+
+
+def _check_argument_limits(name: str, node: ast.Call, parameters: list, text: str) -> None:
+    """Upstream's functions mask their arguments, which silently loses whatever does not fit."""
+    tap = name in ("MT", "LT") or name.endswith("_T") or re.fullmatch(r"LT\d+", name) is not None
+    for parameter, arg in zip(parameters, node.args):
+        limit = {"kc": 0xFF if tap else 0x1FFF, "layer": 0xF if name in ("LT", "LM") else 0xFF, "n": 0xFF,
+                 "mod": 0x1F if name == "MT" or (name == "OSM" and Keycode.protocol == 6)
+                 else Keycode.resolve("QMK_LM_MASK") if name == "LM" else 0xFF}[parameter.name]
+        try:
+            value = Keycode.deserialize(ast.unparse(arg), reraise=True)
+        except Exception as exc:
+            raise _invalid(text, str(exc) or type(exc).__name__) from exc
+        if not 0 <= value <= limit:
+            raise _invalid(text, f"the {parameter.name} argument of {name} does not fit, and part of it would be lost")
 
 
 def _numeric_reference_problem(kb: Keyboard, raw: int) -> tuple[str, str] | None:
@@ -329,7 +363,8 @@ def list_keycodes(query: str | None = None) -> list[KeycodeInfo]:
     for kc in keycode_tables.KEYCODES:
         if kc.hidden or kc in keycode_tables.KEYCODES_HIDDEN:
             continue
-        info = KeycodeInfo(keycode=kc.qmk_id, label=kc.label.replace("\n", " "), description=kc.tooltip,
+        info = KeycodeInfo(keycode=kc.qmk_id, label=printable(kc.label.replace("\n", " ")),
+                           description=printable(kc.tooltip) if kc.tooltip else kc.tooltip,
                            masked=kc.masked, aliases=[a for a in kc.alias if a != kc.qmk_id])
         if needle is None or needle in " ".join([info.keycode, info.label, info.description or "", *info.aliases]).lower():
             out.append(info)
@@ -337,6 +372,10 @@ def list_keycodes(query: str | None = None) -> list[KeycodeInfo]:
 
 
 # Geometry.
+
+def _layout_option_size(item) -> int:
+    return 1 if isinstance(item, str) else (len(item) - 2).bit_length()
+
 
 def layout_choices(labels, value: int) -> list[int]:
     """Decode the packed layout option value. Port of LayoutEditor.unpack/get_choice."""
@@ -346,7 +385,7 @@ def layout_choices(labels, value: int) -> list[int]:
     choices = []
     # VIA stores option choices backwards, parse the value in reverse.
     for item in reversed(labels):
-        size = 1 if isinstance(item, str) else (len(item) - 2).bit_length()
+        size = _layout_option_size(item)
         if size == 0:
             choices.append(0)
             continue
@@ -354,6 +393,23 @@ def layout_choices(labels, value: int) -> list[int]:
         bits = bits[:-size]
     choices.reverse()
     return choices
+
+
+def layout_options_writable(labels) -> bool:
+    """Upstream's writer gives a select with one choice one bit and its reader none, so nothing can pack them safely."""
+    return not any(isinstance(item, list) and len(item) == 2 for item in labels)
+
+
+def layout_option_count(item) -> int:
+    """How many alternatives one option offers. A plain label is on or off."""
+    return 2 if isinstance(item, str) else len(item) - 1
+
+
+def set_layout_choice(labels, value: int, index: int, choice: int) -> int:
+    """Replace one option in the packed value, leaving every other bit as it was."""
+    shift = sum(_layout_option_size(item) for item in labels[index + 1:])
+    mask = ((1 << _layout_option_size(labels[index])) - 1) << shift
+    return (value & ~mask) | (choice << shift)
 
 
 def _geometry(key, ident: str, **extra) -> KeyGeometry:
@@ -386,6 +442,16 @@ def lighting_kind(kb: Keyboard) -> str:
     return "none"
 
 
+def writable_operations(kb: Keyboard) -> list[str]:
+    """Operations this keyboard can take; a family it lacks is not offered."""
+    available = {"set_key": True, "set_encoder": bool(kb.encoder_count), "set_layout_option": bool(kb.layout_labels),
+                 "set_tap_dance": bool(kb.tap_dance_count), "set_combo": bool(kb.combo_count),
+                 "set_key_override": bool(kb.key_override_count), "set_alt_repeat_key": bool(kb.alt_repeat_key_count),
+                 "set_qmk_setting": bool(set(kb.settings)), "set_macro": bool(kb.macro_count and kb.macro_memory),
+                 "set_lighting": lighting_kind(kb) != "none"}
+    return [name for name, present in available.items() if present]
+
+
 def capabilities_of(kb: Keyboard) -> Capabilities:
     return Capabilities(
         layers=kb.layers, rows=kb.rows, cols=kb.cols, key_count=len(kb.keys), encoder_count=kb.encoder_count,
@@ -396,11 +462,12 @@ def capabilities_of(kb: Keyboard) -> Capabilities:
         unknown_qmk_settings=sorted(q for q in kb.supported_settings if not QmkSettings.is_qsid_supported(q)),
         lighting=lighting_kind(kb), layout_option_labels=kb.layout_labels or [],
         supported_features=sorted(kb.supported_features), custom_keycode_count=len(kb.custom_keycodes or []),
-        midi=kb.midi if isinstance(kb.midi, str) else None, writable_operations=list(WRITABLE_OPERATIONS))
+        midi=kb.midi if isinstance(kb.midi, str) else None, writable_operations=writable_operations(kb))
 
 
 def read_configuration(kb: Keyboard) -> Configuration:
     """Convert a freshly reloaded Keyboard. Raw codes come back through upstream's codec."""
+    load_raw_options(kb)
     keymap = [KeymapEntry(layer=l, row=r, col=c, **to_value(code).model_dump())
               for (l, r, c), code in sorted(kb.layout.items())]
     encoders = [EncoderEntry(layer=l, index=i, direction=d, **to_value(code).model_dump())
@@ -429,10 +496,36 @@ def read_configuration(kb: Keyboard) -> Configuration:
         keymap=keymap, encoders=encoders, layout_options=kb.layout_options, macros=macros,
         tap_dance=[list(e) for e in kb.save_tap_dance()], combos=[list(e) for e in kb.save_combo()],
         key_overrides=kb.save_key_override(), alt_repeat_keys=kb.save_alt_repeat_key(),
-        settings=SettingsState(values={str(k): v for k, v in sorted(kb.settings.items())},
-                               unknown_qsids=sorted(q for q in kb.supported_settings
-                                                    if not QmkSettings.is_qsid_supported(q))),
+        settings=_read_settings(kb),
         lighting=lighting)
+
+
+def _read_settings(kb: Keyboard) -> SettingsState:
+    unknown = sorted(q for q in kb.supported_settings if not QmkSettings.is_qsid_supported(q))
+    raw = {}
+    for qsid in unknown:
+        data = kb.usb_send(kb.dev, struct.pack("<BBH", proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_QMK_SETTINGS_GET, qsid),
+                           retries=20)
+        if data[0] == 0:
+            raw[str(qsid)] = bytes(data[1:]).hex()
+    return SettingsState(values={str(k): v for k, v in sorted(kb.settings.items())}, unknown_qsids=unknown,
+                         unreadable_qsids=sorted(q for q in kb.supported_settings
+                                                 if QmkSettings.is_qsid_supported(q) and q not in kb.settings),
+                         unknown_raw=raw)
+
+
+def setting_fields(qsid: int) -> list[dict]:
+    return QmkSettings.qsid_fields[qsid]
+
+
+def setting_change_title(qsid: int, before: int, after: int) -> str:
+    """Name what changes, using the pinned table's own titles."""
+    fields = setting_fields(qsid)
+    if fields[0]["type"] == "integer":
+        return fields[0]["title"]
+    changed = before ^ after
+    names = [f["title"] for f in fields if changed & (1 << f.get("bit", 0))]
+    return "; ".join(names) or fields[0]["title"]
 
 
 def coverage_of(kb: Keyboard, config: Configuration) -> dict[str, str]:
@@ -450,9 +543,277 @@ def coverage_of(kb: Keyboard, config: Configuration) -> dict[str, str]:
         "key_overrides": present(kb.key_override_count),
         "alt_repeat_keys": present(kb.alt_repeat_key_count),
         "settings": ("partial_unknown_qsids" if config.settings.unknown_qsids
+                     else "partial_unreadable_qsids" if config.settings.unreadable_qsids
                      else present(len(kb.supported_settings))),
         "lighting": present(0 if lighting_kind(kb) == "none" else 1),
     }
+
+
+# Macros. The buffer is NUL-separated, so anything that adds or loses a zero byte moves every later macro.
+
+MACRO_TEXT_BYTES = frozenset(range(0x20, 0x7F)) | {0x09, 0x0A}
+MAX_MACRO_DELAY = 254 * 255 + 254  # encoded in two bytes that may not be zero
+
+
+def _macro_error(index: int, position: int, why: str) -> VialticError:
+    """Says what is wrong without repeating the contents, which must not reach output."""
+    return VialticError("invalid_request", f"Macro {index}, action {position}: {why}")
+
+
+def _macro_keycodes(kb: Keyboard, index: int, position: int, codes: list) -> list[str]:
+    names = []
+    for code in codes:
+        if not isinstance(code, str):
+            raise _macro_error(index, position, "keycodes must be text")
+        try:
+            value, _ = parse_keycode(kb, code)
+        except VialticError as exc:
+            raise _macro_error(index, position, f"invalid keycode ({exc.code})") from None
+        if value.raw == 0:
+            raise _macro_error(index, position, "KC_NO would encode a zero byte, which ends the macro")
+        if value.raw > 0xFF and kb.vial_protocol < proto.VIAL_PROTOCOL_EXT_MACROS:
+            raise _macro_error(index, position, f"keycodes above 8 bits need Vial protocol {proto.VIAL_PROTOCOL_EXT_MACROS}")
+        if value.raw > 0xFF00:
+            raise _macro_error(index, position, "this keycode cannot be encoded in a macro")
+        names.append(value.keycode)
+    return names
+
+
+def encode_macro(kb: Keyboard, index: int, actions: list) -> tuple[bytes, list[str]]:
+    """Strictly encode one macro, proving the bytes parse back to themselves. Returns bytes and warnings."""
+    built = []
+    warnings = []
+    for position, action in enumerate(actions):
+        tag = action[0] if action else None
+        if tag == "text":
+            if len(action) != 2 or not isinstance(action[1], str):
+                raise _macro_error(index, position, "text takes one string")
+            if any(ord(ch) not in MACRO_TEXT_BYTES for ch in action[1]):
+                raise _macro_error(index, position, "text may only hold printable ASCII, tabs and newlines")
+            built.append(ActionText(action[1]))
+        elif tag in ("tap", "down", "up"):
+            if len(action) < 2:
+                raise _macro_error(index, position, f"{tag} needs at least one keycode")
+            names = _macro_keycodes(kb, index, position, action[1:])
+            if RESET_KEYCODE in names:
+                warnings.append(f"Macro {index} contains {RESET_KEYCODE}, which puts the keyboard into bootloader mode.")
+            built.append({"tap": ActionTap, "down": ActionDown, "up": ActionUp}[tag](names))
+        elif tag == "delay":
+            if kb.vial_protocol < proto.VIAL_PROTOCOL_ADVANCED_MACROS:
+                raise _macro_error(index, position, f"delays need Vial protocol {proto.VIAL_PROTOCOL_ADVANCED_MACROS}")
+            if len(action) != 2 or isinstance(action[1], bool) or not isinstance(action[1], int) \
+                    or not 0 <= action[1] <= MAX_MACRO_DELAY:
+                raise _macro_error(index, position, f"delay takes one number from 0 to {MAX_MACRO_DELAY}")
+            built.append(ActionDelay(action[1]))
+        else:
+            raise _macro_error(index, position, "the action must be text, tap, down, up or delay")
+    data = kb.macro_serialize(built)
+    if b"\x00" in data or kb.macro_serialize(kb.macro_deserialize(data)) != data:
+        raise VialticError("invalid_request", f"Macro {index} cannot be encoded without changing its meaning.")
+    return data, warnings
+
+
+def macro_segments(buffer: bytes, count: int) -> list[bytes]:
+    """The raw bytes of each macro, exactly as upstream's read cleans the buffer into."""
+    return (buffer.split(b"\x00") + [b""] * count)[:count]
+
+
+def writable_macro_bytes(buffer: bytes, memory: int) -> bytes:
+    """What to send to reproduce a read buffer.
+
+    With too few terminators on the keyboard, upstream's read adds them past the end of the
+    memory. Only those are dropped here, and reading the result gives the same buffer back.
+    The rest of the memory is zeroed: firmware never plays it, and a cleared macro's text
+    must not stay on the keyboard, nor a stray last byte that stops every macro playing.
+    """
+    return buffer[:memory].ljust(memory, b"\x00")
+
+
+def read_macro_memory(kb: Keyboard) -> bytes:
+    """All of it. Upstream stops at the last terminator, which cannot show what lies after it."""
+    data = b""
+    for offset in range(0, kb.macro_memory, proto.BUFFER_FETCH_CHUNK):
+        size = min(proto.BUFFER_FETCH_CHUNK, kb.macro_memory - offset)
+        answer = kb.usb_send(kb.dev, struct.pack(">BHB", proto.CMD_VIA_MACRO_GET_BUFFER, offset, size), retries=20)
+        data += answer[4:4 + size]
+    return data
+
+
+def decode_macro_buffer(text: str) -> bytes:
+    return base64.b64decode(text, validate=True)
+
+
+def macro_preview(segment: bytes, vial_protocol: int) -> list:
+    decode = macro_deserialize_v2 if vial_protocol >= proto.VIAL_PROTOCOL_ADVANCED_MACROS else macro_deserialize_v1
+    return [action.save() for action in decode(segment)]
+
+
+KEY_OVERRIDE_KNOWN_OPTIONS = 0b10111111
+ALT_REPEAT_KNOWN_OPTIONS = 0b00001111
+
+
+# Writes. Upstream's setters update their in-memory copy before sending and some ignore the
+# outcome, so callers must prove every write by reloading from the keyboard.
+
+def tap_dance_value(entry) -> TapDanceValue:
+    return TapDanceValue(on_tap=to_value(entry[0]), on_hold=to_value(entry[1]), on_double_tap=to_value(entry[2]),
+                         on_tap_hold=to_value(entry[3]), tapping_term=entry[4])
+
+
+def tap_dance_wire(value: TapDanceValue) -> tuple:
+    """The form upstream keeps entries in, which is also what snapshots hold."""
+    return (value.on_tap.keycode, value.on_hold.keycode, value.on_double_tap.keycode, value.on_tap_hold.keycode,
+            value.tapping_term)
+
+
+def combo_value(entry) -> ComboValue:
+    return ComboValue(keys=[to_value(code) for code in entry[:4]], output=to_value(entry[4]))
+
+
+def combo_wire(value: ComboValue) -> tuple:
+    return (*(key.keycode for key in value.keys), value.output.keycode)
+
+
+class _RawOptions:
+    """Stands in for upstream's option classes, which drop every bit they do not name."""
+
+    def __init__(self, value: int):
+        self.value = value
+
+    def serialize(self) -> int:
+        return self.value
+
+
+def load_raw_options(kb: Keyboard) -> None:
+    """Replace upstream's filtered option bytes with what the firmware holds."""
+    for entries, cmd, count, fmt in (
+            (kb.key_override_entries, proto.DYNAMIC_VIAL_KEY_OVERRIDE_GET, kb.key_override_count, "<HHHBBBB"),
+            (kb.alt_repeat_key_entries, proto.DYNAMIC_VIAL_ALT_REPEAT_KEY_GET, kb.alt_repeat_key_count, "<HHBB")):
+        for entry, raw in zip(entries, kb._retrieve_dynamic_entries(cmd, count, fmt)):
+            entry.options = _RawOptions(raw[-1])
+
+
+def key_override_value(entry: dict) -> KeyOverrideValue:
+    return KeyOverrideValue(**{**entry, "trigger": to_value(entry["trigger"]), "replacement": to_value(entry["replacement"])})
+
+
+def key_override_wire(value: KeyOverrideValue) -> dict:
+    """The form upstream saves entries in, which is also what snapshots hold."""
+    return {**value.model_dump(), "trigger": value.trigger.keycode, "replacement": value.replacement.keycode}
+
+
+def _key_override_entry(value: KeyOverrideValue) -> KeyOverrideEntry:
+    entry = KeyOverrideEntry((value.trigger.keycode, value.replacement.keycode, value.layers, value.trigger_mods,
+                              value.negative_mod_mask, value.suppressed_mods, 0))
+    entry.options = _RawOptions(value.options)
+    return entry
+
+
+def alt_repeat_value(entry: dict) -> AltRepeatKeyValue:
+    return AltRepeatKeyValue(**{**entry, "keycode": to_value(entry["keycode"]), "alt_keycode": to_value(entry["alt_keycode"])})
+
+
+def alt_repeat_wire(value: AltRepeatKeyValue) -> dict:
+    return {**value.model_dump(), "keycode": value.keycode.keycode, "alt_keycode": value.alt_keycode.keycode}
+
+
+def _alt_repeat_entry(value: AltRepeatKeyValue) -> AltRepeatKeyEntry:
+    entry = AltRepeatKeyEntry((value.keycode.keycode, value.alt_keycode.keycode, value.allowed_mods, 0))
+    entry.options = _RawOptions(value.options)
+    return entry
+
+
+def _write_backlight_brightness(kb: Keyboard, value: int) -> None:
+    """Firmware keeps a level, computing level = value * levels // 255 and reporting level * 255 // levels.
+
+    So a value it reports can land one level lower when written back, and the next value up always
+    lands right. Only read-back decides whether the result is what was asked for.
+    """
+    kb.set_qmk_backlight_brightness(value)
+    data = kb.usb_send(kb.dev, struct.pack(">BB", proto.CMD_VIA_LIGHTING_GET_VALUE, proto.QMK_BACKLIGHT_BRIGHTNESS), retries=20)
+    if data[2] != value and value < 0xFF:
+        kb.set_qmk_backlight_brightness(value + 1)
+
+
+RGBLIGHT_STATIC = 1
+
+
+def _write_rgblight(kb: Keyboard, effect: int, after: dict[str, int], changed: set[str]) -> None:
+    """Firmware ignores colour while off, brightness while breathing and hue in some effects, and
+    from off the first effect packet only turns the light on with its old mode. So colour changes
+    pass through the static effect, whichever effect is on either side."""
+    def set_effect(current: int, wanted: int) -> int:
+        kb.set_qmk_rgblight_effect(wanted)
+        if current == 0 and wanted != 0:
+            kb.set_qmk_rgblight_effect(wanted)
+        return wanted
+
+    if changed & {"brightness", "hue", "saturation"}:
+        if effect != RGBLIGHT_STATIC:
+            effect = set_effect(effect, RGBLIGHT_STATIC)
+        kb.set_qmk_rgblight_color(after["hue"], after["saturation"], after["brightness"])
+    if "effect_speed" in changed:
+        kb.set_qmk_rgblight_effect_speed(after["effect_speed"])
+    if effect != after["effect"]:
+        set_effect(effect, after["effect"])
+
+
+def _write_lighting(kb: Keyboard, op) -> None:
+    """Sets current values only. Saving is a separate step that follows verification."""
+    after, changed = op.after, {name for name in op.after if op.after[name] != op.before.get(name)}
+    if op.system == "rgblight":
+        _write_rgblight(kb, op.before["effect"], after, changed)
+    elif op.system == "backlight":
+        if "brightness" in changed:
+            _write_backlight_brightness(kb, after["brightness"])
+        if "effect" in changed:
+            kb.set_qmk_backlight_effect(after["effect"])
+    else:
+        if not changed:
+            return  # A save of the current values: nothing to send, and mode 0 here could turn the LEDs off.
+        # Firmware ignores speed and colour while off, so going to or staying at off passes through an effect.
+        bridge = op.before["mode"] or min((effect for effect in kb.rgb_supported_effects if effect), default=0)
+        if after["mode"] == 0 and bridge and changed & {"speed", "hue", "saturation", "value"}:
+            kb.rgb_mode, kb.rgb_speed = bridge, after["speed"]
+            kb.set_vialrgb_color(after["hue"], after["saturation"], after["value"])
+        # One packet carries all VialRGB values, so set the two fields upstream's setter does not.
+        kb.rgb_mode, kb.rgb_speed = after["mode"], after["speed"]
+        kb.set_vialrgb_color(after["hue"], after["saturation"], after["value"])
+
+
+def write_operation(kb: Keyboard, op) -> None:
+    if op.type == "set_key":
+        kb.set_key(op.layer, op.row, op.col, op.after.keycode)
+    elif op.type == "set_encoder":
+        kb.set_encoder(op.layer, op.index, op.direction, op.after.keycode)
+    elif op.type == "set_layout_options":
+        kb.set_layout_options(op.after)
+    elif op.type == "set_tap_dance":
+        kb.tap_dance_set(op.index, tap_dance_wire(op.after))
+    elif op.type == "set_combo":
+        kb.combo_set(op.index, combo_wire(op.after))
+    elif op.type == "set_key_override":
+        kb.key_override_set(op.index, _key_override_entry(op.after))
+    elif op.type == "set_alt_repeat_key":
+        kb.alt_repeat_key_set(op.index, _alt_repeat_entry(op.after))
+    elif op.type == "set_qmk_setting":
+        status = kb.qmk_settings_set(op.qsid, op.after)
+        if status != 0:
+            raise RuntimeError(f"the firmware refused QMK setting {op.qsid} (status {status})")
+    elif op.type == "set_macros":
+        if kb.get_unlock_status() != 1:
+            raise UnlockRequired("the keyboard must be physically unlocked for this write")
+        kb.set_macro(writable_macro_bytes(decode_macro_buffer(op.after_buffer_b64), kb.macro_memory))
+    elif op.type == "set_lighting":
+        _write_lighting(kb, op)
+    else:
+        raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
+
+
+def same_encoding(first: int, second: int) -> bool:
+    """Whether saved values mean the same on both protocols: keycodes change at 6, macro bytes at 2 and 5."""
+    return all((first >= boundary) == (second >= boundary)
+               for boundary in (proto.VIAL_PROTOCOL_ADVANCED_MACROS, proto.VIAL_PROTOCOL_EXT_MACROS, 6))
 
 
 def is_vial_protocol_supported(via: int, vial: int) -> bool:

@@ -53,9 +53,9 @@ def test_upstream_keyboard_class_is_the_protocol_implementation():
     from vialtic import vial_adapter as va
 
     assert issubclass(va.HeadlessKeyboard, sys.modules["protocol.keyboard_comm"].Keyboard)
-    # Only definition limits are overridden; reads and writes stay upstream's.
+    # Only definition limits and the refusal to read during an unlock; reads and writes stay upstream's.
     overridden = {k for k in vars(va.HeadlessKeyboard) if not k.startswith("__")}
-    assert overridden == {"reload_layout", "_fetch_definition", "reload_layers"}
+    assert overridden == {"reload_layout", "_fetch_definition", "reload_layers", "_refuse_during_unlock"}
 
 
 def test_package_build_cannot_collect_the_web_tree():

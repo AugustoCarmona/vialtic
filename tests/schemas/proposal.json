@@ -1,5 +1,32 @@
 {
   "$defs": {
+    "AltRepeatKeyValue": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_mods": {
+          "title": "Allowed Mods",
+          "type": "integer"
+        },
+        "alt_keycode": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "keycode": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "options": {
+          "title": "Options",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "keycode",
+        "alt_keycode",
+        "allowed_mods",
+        "options"
+      ],
+      "title": "AltRepeatKeyValue",
+      "type": "object"
+    },
     "Baseline": {
       "additionalProperties": false,
       "properties": {
@@ -23,6 +50,27 @@
         "checked_families"
       ],
       "title": "Baseline",
+      "type": "object"
+    },
+    "ComboValue": {
+      "additionalProperties": false,
+      "properties": {
+        "keys": {
+          "items": {
+            "$ref": "#/$defs/KeycodeValue"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
+        "output": {
+          "$ref": "#/$defs/KeycodeValue"
+        }
+      },
+      "required": [
+        "keys",
+        "output"
+      ],
+      "title": "ComboValue",
       "type": "object"
     },
     "DeviceIdentity": {
@@ -145,6 +193,48 @@
       "title": "DeviceIdentity",
       "type": "object"
     },
+    "KeyOverrideValue": {
+      "additionalProperties": false,
+      "properties": {
+        "layers": {
+          "title": "Layers",
+          "type": "integer"
+        },
+        "negative_mod_mask": {
+          "title": "Negative Mod Mask",
+          "type": "integer"
+        },
+        "options": {
+          "title": "Options",
+          "type": "integer"
+        },
+        "replacement": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "suppressed_mods": {
+          "title": "Suppressed Mods",
+          "type": "integer"
+        },
+        "trigger": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "trigger_mods": {
+          "title": "Trigger Mods",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "trigger",
+        "replacement",
+        "layers",
+        "trigger_mods",
+        "negative_mod_mask",
+        "suppressed_mods",
+        "options"
+      ],
+      "title": "KeyOverrideValue",
+      "type": "object"
+    },
     "KeycodeValue": {
       "additionalProperties": false,
       "description": "A firmware keycode. `raw` is authoritative, `keycode`/`label` are for people.",
@@ -170,6 +260,63 @@
       "title": "KeycodeValue",
       "type": "object"
     },
+    "MacroChangeSummary": {
+      "additionalProperties": false,
+      "description": "One macro the buffer write changes. `before` and `after` are a parsed preview for people;\nthey can hide malformed bytes, and the buffers below are what is written.",
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {},
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After"
+        },
+        "after_bytes": {
+          "title": "After Bytes",
+          "type": "integer"
+        },
+        "before": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {},
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before"
+        },
+        "before_bytes": {
+          "title": "Before Bytes",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "before_bytes",
+        "after_bytes"
+      ],
+      "title": "MacroChangeSummary",
+      "type": "object"
+    },
     "ProposalUnlock": {
       "additionalProperties": false,
       "properties": {
@@ -189,6 +336,62 @@
         "required"
       ],
       "title": "ProposalUnlock",
+      "type": "object"
+    },
+    "SetAltRepeatKeyOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/AltRepeatKeyValue"
+        },
+        "before": {
+          "$ref": "#/$defs/AltRepeatKeyValue"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_alt_repeat_key",
+          "default": "set_alt_repeat_key",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "before",
+        "after"
+      ],
+      "title": "SetAltRepeatKeyOperation",
+      "type": "object"
+    },
+    "SetComboOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/ComboValue"
+        },
+        "before": {
+          "$ref": "#/$defs/ComboValue"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_combo",
+          "default": "set_combo",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "before",
+        "after"
+      ],
+      "title": "SetComboOperation",
       "type": "object"
     },
     "SetEncoderOperation": {
@@ -267,6 +470,280 @@
       "title": "SetKeyOperation",
       "type": "object"
     },
+    "SetKeyOverrideOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/KeyOverrideValue"
+        },
+        "before": {
+          "$ref": "#/$defs/KeyOverrideValue"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_key_override",
+          "default": "set_key_override",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "before",
+        "after"
+      ],
+      "title": "SetKeyOverrideOperation",
+      "type": "object"
+    },
+    "SetLayoutOptionsOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "title": "After",
+          "type": "integer"
+        },
+        "after_choices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "After Choices",
+          "type": "array"
+        },
+        "before": {
+          "title": "Before",
+          "type": "integer"
+        },
+        "before_choices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Before Choices",
+          "type": "array"
+        },
+        "type": {
+          "const": "set_layout_options",
+          "default": "set_layout_options",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "title": "SetLayoutOptionsOperation",
+      "type": "object"
+    },
+    "SetLightingOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "After",
+          "type": "object"
+        },
+        "before": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Before",
+          "type": "object"
+        },
+        "save": {
+          "title": "Save",
+          "type": "boolean"
+        },
+        "system": {
+          "enum": [
+            "rgblight",
+            "backlight",
+            "vialrgb"
+          ],
+          "title": "System",
+          "type": "string"
+        },
+        "type": {
+          "const": "set_lighting",
+          "default": "set_lighting",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "before",
+        "after",
+        "save"
+      ],
+      "title": "SetLightingOperation",
+      "type": "object"
+    },
+    "SetMacrosOperation": {
+      "additionalProperties": false,
+      "description": "Macros are one firmware buffer, written whole. Contents are removed from default output.",
+      "properties": {
+        "after_buffer_b64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Buffer B64"
+        },
+        "after_used_bytes": {
+          "title": "After Used Bytes",
+          "type": "integer"
+        },
+        "before_buffer_b64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before Buffer B64"
+        },
+        "before_used_bytes": {
+          "title": "Before Used Bytes",
+          "type": "integer"
+        },
+        "changed": {
+          "items": {
+            "$ref": "#/$defs/MacroChangeSummary"
+          },
+          "title": "Changed",
+          "type": "array"
+        },
+        "memory_bytes": {
+          "title": "Memory Bytes",
+          "type": "integer"
+        },
+        "redacted": {
+          "default": false,
+          "title": "Redacted",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "set_macros",
+          "default": "set_macros",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "changed",
+        "memory_bytes",
+        "before_used_bytes",
+        "after_used_bytes"
+      ],
+      "title": "SetMacrosOperation",
+      "type": "object"
+    },
+    "SetQmkSettingOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "title": "After",
+          "type": "integer"
+        },
+        "before": {
+          "title": "Before",
+          "type": "integer"
+        },
+        "qsid": {
+          "title": "Qsid",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "set_qmk_setting",
+          "default": "set_qmk_setting",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "qsid",
+        "title",
+        "before",
+        "after"
+      ],
+      "title": "SetQmkSettingOperation",
+      "type": "object"
+    },
+    "SetTapDanceOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/TapDanceValue"
+        },
+        "before": {
+          "$ref": "#/$defs/TapDanceValue"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_tap_dance",
+          "default": "set_tap_dance",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "before",
+        "after"
+      ],
+      "title": "SetTapDanceOperation",
+      "type": "object"
+    },
+    "TapDanceValue": {
+      "additionalProperties": false,
+      "properties": {
+        "on_double_tap": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "on_hold": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "on_tap": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "on_tap_hold": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "tapping_term": {
+          "title": "Tapping Term",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "on_tap",
+        "on_hold",
+        "on_double_tap",
+        "on_tap_hold",
+        "tapping_term"
+      ],
+      "title": "TapDanceValue",
+      "type": "object"
+    },
     "UnlockPosition": {
       "additionalProperties": false,
       "properties": {
@@ -326,8 +803,16 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "set_alt_repeat_key": "#/$defs/SetAltRepeatKeyOperation",
+            "set_combo": "#/$defs/SetComboOperation",
             "set_encoder": "#/$defs/SetEncoderOperation",
-            "set_key": "#/$defs/SetKeyOperation"
+            "set_key": "#/$defs/SetKeyOperation",
+            "set_key_override": "#/$defs/SetKeyOverrideOperation",
+            "set_layout_options": "#/$defs/SetLayoutOptionsOperation",
+            "set_lighting": "#/$defs/SetLightingOperation",
+            "set_macros": "#/$defs/SetMacrosOperation",
+            "set_qmk_setting": "#/$defs/SetQmkSettingOperation",
+            "set_tap_dance": "#/$defs/SetTapDanceOperation"
           },
           "propertyName": "type"
         },
@@ -337,6 +822,30 @@
           },
           {
             "$ref": "#/$defs/SetEncoderOperation"
+          },
+          {
+            "$ref": "#/$defs/SetLayoutOptionsOperation"
+          },
+          {
+            "$ref": "#/$defs/SetTapDanceOperation"
+          },
+          {
+            "$ref": "#/$defs/SetComboOperation"
+          },
+          {
+            "$ref": "#/$defs/SetKeyOverrideOperation"
+          },
+          {
+            "$ref": "#/$defs/SetAltRepeatKeyOperation"
+          },
+          {
+            "$ref": "#/$defs/SetQmkSettingOperation"
+          },
+          {
+            "$ref": "#/$defs/SetMacrosOperation"
+          },
+          {
+            "$ref": "#/$defs/SetLightingOperation"
           }
         ]
       },

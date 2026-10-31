@@ -4,7 +4,7 @@ Last updated: 2026-10-31.
 
 ## Actual state
 
-M0, M1 and M2 gates are met. USB with a real keyboard on macOS is the pending item M0 allows and identifies. One approved keymap change, read-back and undo is hardware-verified on the owner's Corne. This work was pushed to `main` at the owner's request; no release, tag, agent configuration or system setting was created or changed.
+M0, M1 and M2 gates are met. M3 code and its emulator and CI gates are met on branch `feat/m3-config-coverage`, not merged. Only keymap keys have ever been written on hardware: one approved change, read-back and undo on the owner's Corne. Every other family is emulator-tested only until the owner runs `docs/HARDWARE_TEST.md`. USB with a real keyboard on macOS is the pending item M0 allows and identifies. No release, tag, agent configuration or system setting was created or changed.
 
 Layout added: `src/vialtic/` (CLI, service, proposals, storage, device, adapter, render, emulator), `vendor/vial/` (pinned Vial GUI subset), `tests/`, `packaging/`, `requirements.lock`, `.github/workflows/ci.yml`, `docs/CLI.md`. The Vial Web sources at the root are untouched.
 
@@ -28,10 +28,15 @@ Typed models and schema fixtures (`tests/schemas/`), JSON errors and exit codes 
 
 Immutable content-addressed proposals, baseline checks, per-device OS locks, durable pre-write backup, journaling, read-back, attestation scoped to proposal and device, guided physical unlock with relock, one automatic previous state, undo, bounded automatic restore, restart recovery, fault injection.
 
-- Writable operations are `set_key` and `set_encoder` only. Other families are read and backed up; M3 adds writing them. Undo refuses (`restore_unsupported`) if one of them differs. Recovery leaves them as they are and says so, because refusing would lock the keyboard out of all further plans.
 - Hardware: the gate's one approved Corne change, read-back and undo passed on 2026-10-31. See "Evidence". The other guarantees in this milestone are emulator-tested only.
 
-M3 to M7 have not started.
+### M3: complete configuration coverage. Emulator and CI gates met; hardware unverified.
+
+Layout options, tap dance, combos, key overrides, alternate repeat keys, QMK settings, macros and lighting are written through the same proposal pipeline as keys and encoders, each with read, validate, propose, apply, verify, backup and restore tests in `tests/test_families.py` and an explicit capability error. `docs/CAPABILITIES.md` is the checked matrix, including upstream traps and non-configuration functions. The permanent `tests/test_fault_sweep.py` injects a crash, an interrupt and a full disk at every state-file operation and packet, for 12 operation types across change, undo, recovery and automatic restore.
+
+**Hardware: nothing in this milestone has run on a real keyboard.** Firmware behavior beyond upstream's Python comes from reading vial-qmk source at branch head, not from a device: the unlock command filter, `QK_BOOT` firewall, backlight levels and RGB restrictions.
+
+M4 to M7 have not started.
 
 ## Version
 
@@ -63,20 +68,23 @@ Emulator-tested only, not verified on hardware: failure recovery and automatic r
 
 - Emulator answers the wire protocol below upstream's `Keyboard` instead of extending `DummyKeyboard`, so codecs, the gate and transport failures are exercised. Rationale in UPSTREAM.md.
 - `apply --user-approved` is the attestation flag. It cannot prove consent; documented in CLI.md.
-- Stale checks cover every family except lighting, which lighting keys on the keyboard can change at any moment. Lighting differences during undo are warnings.
+- Stale checks and verification cover lighting only in proposals that change it, since lighting keys on the keyboard can change it at any moment. Undo and recovery restore only the lighting systems the reversed write changed, repeating its save choice.
+- **Unknown QMK settings (resolves the SPEC 7 question):** a qsid missing from the pinned table has an unknown width, so it is never written, and a request for one is refused. Its raw answer is kept with the backup and undo reports if it moved. Other writes proceed, because nothing Vialtic sends touches these settings, so undo remains reliable for everything Vialtic changes, which is what the backup rule protects. Proposals warn about them. A known qsid the firmware refuses to report is flagged and refused, since it could not be backed up.
+- Saving lighting is an explicit required choice. It is sent last, after verification, and is reported as acknowledged rather than verified, because firmware cannot report saved values.
+- A write refuses to replace a `previous.json` it cannot read, so a future or damaged file is kept, and moving it aside by hand is the way forward.
+- A macro write sends the whole buffer and zeroes the unused rest, so cleared text does not stay in keyboard memory. Reads and backups use the bytes up to the last terminator, which is all firmware can play.
 - `snapshot` leaves out macro contents unless `--include-macros` is given. Backups keep them, owner-only.
-- Unknown QMK settings produce a warning and do not block keymap writes, since this build cannot write settings. Revisit when M3 makes them writable (SPEC 7).
 - Identical units: writing after a path change needs an explicit `--device`, automatic restore stops unless the path matches and the values are explained, and backups are per identity. Corne firmware falls in this category.
 - Dependencies: Python 3.12 or newer, `hidapi` 0.15 (ships `hidraw` for Linux, replacing upstream's fork), Pillow, pydantic, `simpleeval`. Exact versions and hashes are in `requirements.lock`, compiled with `uv pip compile --universal`.
 
 ## Next action
 
-Implement M3 from PLAN.md: the capability matrix and writing for the remaining families through the same pipeline, starting by extending `RESTORABLE_FAMILIES` and `WRITABLE_OPERATIONS` in `src/vialtic/vial_adapter.py`. Pushes, tags and releases need the owner's request.
+Run `docs/HARDWARE_TEST.md` on the Corne (owner). Merge decisions and pushes to `main` need the owner's request.
 
 ## Unresolved engineering work
 
 - Verify USB with a real keyboard on macOS, and fix the minimum macOS version from evidence.
 - CI warns that `actions/checkout@v4`, `setup-python@v5` and `upload-artifact@v4` target the deprecated Node.js 20. They still work, forced onto Node.js 24; update them when convenient.
-- Implement M3 to M7, including `profile`, `import`, `export`, `mcp serve` and `update`.
+- Implement M4 to M7, including `profile`, `import`, `export`, `mcp serve` and `update`.
 - Obtain macOS Apple Silicon hardware evidence when needed. Missing hardware is a verification limitation, not permission to claim passing results.
 - Decide signing and notarization on evidence.

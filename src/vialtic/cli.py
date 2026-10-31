@@ -86,11 +86,15 @@ def build_parser() -> argparse.ArgumentParser:
                       help="assign a key, e.g. 1:0,2=LGUI(KC_3); repeatable")
     plan.add_argument("--set-encoder", dest="set_encoders", action="append", metavar="L:I:D=KEYCODE", default=[],
                       help="assign an encoder direction; repeatable")
-    plan.add_argument("--changes", metavar="FILE", help="read a change_set JSON file, or - for stdin")
+    plan.add_argument("--changes", metavar="FILE",
+                      help="read a change_set JSON file, or - for stdin; needed for every feature except keys and encoders "
+                           "(see `vialtic schema change_set`)")
 
     proposal = sub.add_parser("proposal", help="Read stored proposals.").add_subparsers(dest="action", required=True, parser_class=_Parser)
     show = leaf(proposal, "show", "Show a stored proposal.", device=False)
     show.add_argument("proposal_id")
+    show.add_argument("--include-macros", action="store_true",
+                      help="include macro contents, which can hold typed text; left out by default")
 
     apply_cmd = leaf(sub, "apply", "Apply one approved proposal, verify it and keep a backup.")
     apply_cmd.add_argument("proposal_id")
@@ -123,12 +127,22 @@ _KEY_SPEC = re.compile(r"^(\d+):(\d+),(\d+)=(.+)$")
 _ENCODER_SPEC = re.compile(r"^(\d+):(\d+):([01])=(.+)$")
 
 
+MAX_CHANGE_FILE = 4 * 1024 * 1024
+
+
+def _read_bounded(path: str) -> str:
+    with open(path, encoding="utf-8", errors="replace") as source:
+        return source.read(MAX_CHANGE_FILE + 1)
+
+
 def _changes_from_args(args: argparse.Namespace) -> ChangeSet:
     if args.changes and (args.set_keys or args.set_encoders):
         raise UsageError("Use --changes or --set/--set-encoder, not both.")
     if args.changes:
         try:
-            text = sys.stdin.read() if args.changes == "-" else pathlib.Path(args.changes).read_text()
+            text = sys.stdin.read(MAX_CHANGE_FILE + 1) if args.changes == "-" else _read_bounded(args.changes)
+            if len(text) > MAX_CHANGE_FILE:
+                raise VialticError("invalid_file", f"The change set is over the {MAX_CHANGE_FILE} byte limit.")
             return ChangeSet.model_validate_json(text)
         except OSError as exc:
             raise VialticError("invalid_file", f"Could not read {args.changes}: {exc}") from exc
@@ -155,7 +169,20 @@ def _changes_from_args(args: argparse.Namespace) -> ChangeSet:
 def _redact_macros(snapshot: Snapshot) -> Snapshot:
     config = snapshot.configuration
     macros = config.macros.model_copy(update=dict(buffer_b64=None, macros=None, redacted=True))
-    return snapshot.model_copy(update={"configuration": config.model_copy(update={"macros": macros})})
+    return snapshot.model_copy(update={"configuration": config.model_copy(update={"macros": macros}),
+                                       "family_fingerprints": redact_fingerprints(snapshot.family_fingerprints)})
+
+
+def redact_fingerprints(fingerprints: dict[str, str]) -> dict[str, str]:
+    from .proposals import redact_fingerprints as redact
+
+    return redact(fingerprints)
+
+
+def _redacted(proposal: Proposal) -> Proposal:
+    from .proposals import redact_proposal
+
+    return redact_proposal(proposal)
 
 
 def _progress(message: str) -> None:
@@ -227,7 +254,7 @@ def _format_inspect(result: InspectResult) -> str:
         f"combos {caps.combo_count}, key overrides {caps.key_override_count}, alt repeat {caps.alt_repeat_key_count}",
         f"  Lighting {caps.lighting}, QMK settings {len(caps.qmk_settings)}"
         + (f" (+{len(caps.unknown_qmk_settings)} unknown)" if caps.unknown_qmk_settings else ""),
-        f"  Writable in this build: {', '.join(caps.writable_operations)}. All families are read and backed up.",
+        f"  Writable on this keyboard: {', '.join(caps.writable_operations)}. All families are read and backed up.",
         f"  Unlocked: {'yes' if result.unlock.unlocked else 'no'}; unlock keys: {unlock_keys}",
         f"  Previous configuration saved: {'yes' if result.previous_available else 'no'}",
     ]
@@ -385,7 +412,7 @@ def run(args: argparse.Namespace) -> int:
         if not args.include_macros:
             snapshot = _redact_macros(snapshot)
         if args.output:
-            atomic_write(pathlib.Path(args.output), snapshot.model_dump_json(indent=2).encode())
+            atomic_write(pathlib.Path(args.output), snapshot.model_dump_json(indent=2).encode(), own_directory=False)
             _progress(f"Snapshot written to {args.output}")
         emit(args, snapshot)
     elif command == "view":
@@ -393,18 +420,19 @@ def run(args: argparse.Namespace) -> int:
     elif command == "keycodes":
         emit(args, service.keycodes(selector, args.query))
     elif command == "plan":
-        emit(args, service.create_proposal(selector, _changes_from_args(args)))
+        emit(args, _redacted(service.create_proposal(selector, _changes_from_args(args))))
     elif command == "proposal":
-        emit(args, service.get_proposal(args.proposal_id))
+        proposal = service.get_proposal(args.proposal_id)
+        emit(args, proposal if args.include_macros else _redacted(proposal))
     elif command == "apply":
         signal.signal(signal.SIGTERM, _raise_interrupt)
         result = service.apply_proposal(args.proposal_id, _approval(service, args.proposal_id, args.user_approved), selector)
         emit(args, result, ok=result.outcome == "verified")
         return EXIT_OK if result.outcome == "verified" else EXIT_APPLY_FAILED
     elif command == "undo":
-        emit(args, service.create_undo_proposal(selector))
+        emit(args, _redacted(service.create_undo_proposal(selector)))
     elif command == "recover":
-        emit(args, service.create_recovery_proposal(selector))
+        emit(args, _redacted(service.create_recovery_proposal(selector)))
     elif command == "unlock":
         if action == "status":
             emit(args, service.unlock_status(selector))
@@ -433,7 +461,8 @@ def main(argv: list[str] | None = None) -> int:
         emit_error(args, error)
         return error.exit_code
     except KeyboardInterrupt:
-        emit_error(args, VialticError("cancelled", "Cancelled."))
+        emit_error(args, VialticError("cancelled", "Cancelled. If a write was in progress the keyboard may hold a mix of old "
+                                                   "and new values. Run `vialtic doctor`."))
         return VialticError("cancelled", "").exit_code
     except BrokenPipeError:
         return EXIT_USAGE

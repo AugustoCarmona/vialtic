@@ -42,6 +42,24 @@ jobs:
           # Composite keycodes need the locked simpleeval, which a named keycode would not exercise.
           env -i HOME="$state" XDG_STATE_HOME="$state/state" "$binary" plan --emulator split --set '1:0,2=LGUI(KC_3)' --set '0:0,0=LT(1, KC_A)'
           env -i HOME="$state" XDG_STATE_HOME="$state/state" "$binary" devices list
+          # Every family through the packaged binary: plan, apply with read-back, and undo.
+          cat > "$state/changes.json" <<'JSON'
+          {"schema_version": 1, "changes": [
+            {"type": "set_layout_option", "index": 1, "choice": 2},
+            {"type": "set_tap_dance", "index": 0, "on_tap": "LT(1, KC_A)", "tapping_term": 150},
+            {"type": "set_combo", "index": 0, "keys": ["KC_A", "KC_B"], "output": "KC_C"},
+            {"type": "set_key_override", "index": 0, "trigger": "KC_A", "replacement": "KC_B", "options": 128},
+            {"type": "set_alt_repeat_key", "index": 0, "keycode": "KC_A", "alt_keycode": "KC_B", "options": 8},
+            {"type": "set_qmk_setting", "qsid": 7, "value": 175},
+            {"type": "set_macro", "index": 0, "actions": [["text", "ok"], ["tap", "LCTL(KC_A)"], ["delay", 10]]},
+            {"type": "set_lighting", "system": "vialrgb", "save": true, "mode": 3}
+          ]}
+          JSON
+          run() { env -i HOME="$state" XDG_STATE_HOME="$state/state" "$binary" "$@" --emulator full; }
+          proposal="$(run plan --changes "$state/changes.json" | sed -n 's/^Proposal \(pr-[0-9a-f]*\) .*/\1/p')"
+          run apply "$proposal" --user-approved
+          proposal="$(run undo plan | sed -n 's/^Proposal \(pr-[0-9a-f]*\) .*/\1/p')"
+          run apply "$proposal" --user-approved
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

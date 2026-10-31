@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """M2 gate: no writes before approval, no stale or unsupported writes, backups survive
 failures, and incomplete state is never reported as success."""
+import dataclasses
 import json
 import os
 import stat
@@ -552,14 +553,40 @@ def test_undo_with_nothing_different_is_explicit(rig):
     assert error.value.code == "no_changes"
 
 
-def test_undo_refuses_when_a_family_it_cannot_restore_differs(rig):
+def _shrink_tap_dance(rig):
+    """The firmware was rebuilt with fewer entries; the definition, and so the binding, are the same."""
+    firmware = rig.backend.firmware(0)
+    firmware.spec = dataclasses.replace(firmware.spec, tap_dance_count=firmware.spec.tap_dance_count - 1)
+    firmware.state["tap_dance"].pop()
+
+
+def test_undo_restores_a_family_that_moved_after_the_write(rig):
     rig.apply(rig.plan((1, 0, 2, "KC_A")))
     rig.backend.firmware(0).state["tap_dance"][0][4] = 123
+    undo = rig.service.create_undo_proposal(None)
+    assert sorted(undo.affected) == ["keymap", "tap_dance"]
+    assert rig.apply(undo).outcome == "verified"
+    assert rig.backend.firmware(0).state["tap_dance"][0][4] == 200 and code(rig) == ORIGINAL
+
+
+def test_undo_refuses_when_the_firmware_no_longer_has_the_same_entries(rig):
+    rig.apply(rig.plan((1, 0, 2, "KC_A")))
+    _shrink_tap_dance(rig)
     with pytest.raises(VialticError) as error:
         rig.service.create_undo_proposal(None)
     assert error.value.code == "restore_unsupported"
     assert error.value.details["families"] == ["tap_dance"]
     assert code(rig) == KC_A
+
+
+def test_undo_refuses_across_a_keycode_generation(make_rig):
+    rig = make_rig()
+    rig.apply(rig.plan((1, 0, 2, "KC_A")))
+    firmware = rig.backend.firmware(0)
+    firmware.spec = dataclasses.replace(firmware.spec, vial_protocol=5)
+    with pytest.raises(VialticError) as error:
+        rig.service.create_undo_proposal(None)
+    assert error.value.code == "device_changed" and "encodes keycodes or macros differently" in error.value.message
 
 
 def test_undo_warns_about_lighting_it_cannot_restore(rig):
@@ -730,7 +757,7 @@ def test_proposal_file_copied_over_another_id_is_refused(rig):
     assert rig.write_packets() == 0
 
 
-def test_recovery_is_not_blocked_by_families_it_cannot_write(make_rig):
+def test_recovery_restores_a_family_that_moved_after_the_interrupted_write(make_rig):
     rig = make_rig()
     before = rig.service.read_snapshot()
     proposal = _multi_plan(rig)
@@ -741,13 +768,29 @@ def test_recovery_is_not_blocked_by_families_it_cannot_write(make_rig):
     restarted = rig.restart()
     restarted.backend.firmware(0).state["tap_dance"][0][4] = 123
     recovery = restarted.service.create_recovery_proposal(None)
-    assert any("tap_dance changed" in w for w in recovery.warnings)
+    assert "tap_dance" in recovery.affected
+    assert restarted.apply(recovery).outcome == "verified"
+    after = restarted.service.read_snapshot()
+    assert after.family_fingerprints == before.family_fingerprints
+
+
+def test_recovery_is_not_blocked_by_entries_the_firmware_no_longer_has(make_rig):
+    rig = make_rig()
+    before = rig.service.read_snapshot()
+    proposal = _multi_plan(rig)
+    crash = _crash_on_write(rig)
+    with pytest.raises(crash):
+        rig.apply(proposal)
+
+    restarted = rig.restart()
+    _shrink_tap_dance(restarted)
+    recovery = restarted.service.create_recovery_proposal(None)
+    assert any("tap_dance" in w and "stay as they are" in w for w in recovery.warnings)
     result = restarted.apply(recovery)
     assert result.outcome == "verified"
 
     after = restarted.service.read_snapshot()
     assert after.family_fingerprints["keymap"] == before.family_fingerprints["keymap"]
-    assert after.configuration.tap_dance[0][4] == 123, "left as it is, as the proposal said"
     assert not restarted.store.has_unresolved_write(proposal.device.binding_id)
     restarted.plan((0, 0, 0, "KC_Z"))
 
@@ -760,7 +803,7 @@ def test_recovery_verification_still_notices_a_skipped_family_moving(make_rig):
         rig.apply(proposal)
     restarted = rig.restart()
     firmware = restarted.backend.firmware(0)
-    firmware.state["tap_dance"][0][4] = 123
+    _shrink_tap_dance(restarted)
     recovery = restarted.service.create_recovery_proposal(None)
     original = restarted.service._write_operation
 
@@ -972,11 +1015,15 @@ def test_marker_is_dropped_once_the_firmware_is_locked(make_rig):
     assert rig.store.read_unlock_marker(binding) is None
 
 
-def test_unlock_timeout_clears_the_marker(make_rig):
+def test_unlock_timeout_keeps_the_marker_until_a_replug_ends_the_unlock(make_rig):
+    """Firmware ignores a lock while it waits, and polling could still complete that unlock."""
     rig = make_rig(faults=Faults(unlock_never=True), unlock_timeout=0.02)
     proposal = rig.plan((1, 0, 2, "QK_BOOT"))
     with pytest.raises(VialticError):
         rig.apply(proposal)
+    assert rig.store.read_unlock_marker(proposal.device.binding_id) == proposal.id
+    rig.backend.firmware(0).power_cycle()
+    assert rig.service.inspect_device().warnings == []
     assert rig.store.read_unlock_marker(proposal.device.binding_id) is None
 
 
@@ -1099,7 +1146,7 @@ def test_proposal_lists_what_the_backup_cannot_hold(make_rig):
     snapshot = rig.service.read_snapshot()
     assert snapshot.coverage["settings"] == "partial_unknown_qsids"
     proposal = rig.plan((1, 0, 2, "KC_A"))
-    assert any("60000" in w and "not read or backed up" in w for w in proposal.warnings)
+    assert any("60000" in w and "never writes" in w for w in proposal.warnings)
     assert "Everything Vialtic can read" in proposal.recovery and "full configuration" not in proposal.recovery
 
 

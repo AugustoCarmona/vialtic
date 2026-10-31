@@ -1,5 +1,123 @@
 {
   "$defs": {
+    "SetAltRepeatKeyChange": {
+      "additionalProperties": false,
+      "description": "Change one alternate repeat entry. Fields left out keep their current value.\nIn `options`, bit 3 enables the entry.",
+      "properties": {
+        "allowed_mods": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Mods"
+        },
+        "alt_keycode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alt Keycode"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "keycode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keycode"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Options"
+        },
+        "type": {
+          "const": "set_alt_repeat_key",
+          "default": "set_alt_repeat_key",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index"
+      ],
+      "title": "SetAltRepeatKeyChange",
+      "type": "object"
+    },
+    "SetComboChange": {
+      "additionalProperties": false,
+      "description": "Change one combo. `keys` lists up to four inputs and replaces all of them. Fields left out keep their value.",
+      "properties": {
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "keys": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keys"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output"
+        },
+        "type": {
+          "const": "set_combo",
+          "default": "set_combo",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index"
+      ],
+      "title": "SetComboChange",
+      "type": "object"
+    },
     "SetEncoderChange": {
       "additionalProperties": false,
       "properties": {
@@ -69,6 +187,433 @@
       ],
       "title": "SetKeyChange",
       "type": "object"
+    },
+    "SetKeyOverrideChange": {
+      "additionalProperties": false,
+      "description": "Change one key override. Fields left out keep their current value. Masks are integers:\n`layers` has one bit per layer, modifier masks follow QMK's MOD_BIT layout, and `options`\nholds the firmware flags, with bit 7 enabling the entry.",
+      "properties": {
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "layers": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Layers"
+        },
+        "negative_mod_mask": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Negative Mod Mask"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Options"
+        },
+        "replacement": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replacement"
+        },
+        "suppressed_mods": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suppressed Mods"
+        },
+        "trigger": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trigger"
+        },
+        "trigger_mods": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trigger Mods"
+        },
+        "type": {
+          "const": "set_key_override",
+          "default": "set_key_override",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index"
+      ],
+      "title": "SetKeyOverrideChange",
+      "type": "object"
+    },
+    "SetLayoutOptionChange": {
+      "additionalProperties": false,
+      "description": "Choose one firmware-defined layout alternative. `index` is its position in the option list.",
+      "properties": {
+        "choice": {
+          "title": "Choice",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_layout_option",
+          "default": "set_layout_option",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "choice"
+      ],
+      "title": "SetLayoutOptionChange",
+      "type": "object"
+    },
+    "SetLightingChange": {
+      "additionalProperties": false,
+      "description": "Change one lighting system. Fields left out keep their current value.\n\nrgblight takes brightness, effect, effect_speed, hue, saturation. backlight takes brightness,\neffect. vialrgb takes mode, speed, hue, saturation, value. `save` is required: true sends the\nfirmware's one save command, which persists all lighting; false lasts until the next power cycle.",
+      "properties": {
+        "brightness": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Brightness"
+        },
+        "effect": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effect"
+        },
+        "effect_speed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effect Speed"
+        },
+        "hue": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hue"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode"
+        },
+        "saturation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Saturation"
+        },
+        "save": {
+          "title": "Save",
+          "type": "boolean"
+        },
+        "speed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speed"
+        },
+        "system": {
+          "enum": [
+            "rgblight",
+            "backlight",
+            "vialrgb"
+          ],
+          "title": "System",
+          "type": "string"
+        },
+        "type": {
+          "const": "set_lighting",
+          "default": "set_lighting",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "system",
+        "save"
+      ],
+      "title": "SetLightingChange",
+      "type": "object"
+    },
+    "SetMacroChange": {
+      "additionalProperties": false,
+      "description": "Replace one macro. `actions` holds [\"text\", \"abc\"], [\"tap\", \"KC_A\", ...], [\"down\", ...],\n[\"up\", ...] or [\"delay\", milliseconds]. An empty list clears the macro.",
+      "properties": {
+        "actions": {
+          "items": {
+            "items": {},
+            "type": "array"
+          },
+          "maxItems": 4096,
+          "title": "Actions",
+          "type": "array"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_macro",
+          "default": "set_macro",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "actions"
+      ],
+      "title": "SetMacroChange",
+      "type": "object"
+    },
+    "SetQmkSettingChange": {
+      "additionalProperties": false,
+      "description": "Change one QMK setting: either the whole `value`, or one flag with `bit` and `enabled`.",
+      "properties": {
+        "bit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bit"
+        },
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enabled"
+        },
+        "qsid": {
+          "title": "Qsid",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_qmk_setting",
+          "default": "set_qmk_setting",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "qsid"
+      ],
+      "title": "SetQmkSettingChange",
+      "type": "object"
+    },
+    "SetTapDanceChange": {
+      "additionalProperties": false,
+      "description": "Change one tap dance entry. Fields left out keep their current value.",
+      "properties": {
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "on_double_tap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Double Tap"
+        },
+        "on_hold": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Hold"
+        },
+        "on_tap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Tap"
+        },
+        "on_tap_hold": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Tap Hold"
+        },
+        "tapping_term": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tapping Term"
+        },
+        "type": {
+          "const": "set_tap_dance",
+          "default": "set_tap_dance",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index"
+      ],
+      "title": "SetTapDanceChange",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -77,8 +622,16 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "set_alt_repeat_key": "#/$defs/SetAltRepeatKeyChange",
+            "set_combo": "#/$defs/SetComboChange",
             "set_encoder": "#/$defs/SetEncoderChange",
-            "set_key": "#/$defs/SetKeyChange"
+            "set_key": "#/$defs/SetKeyChange",
+            "set_key_override": "#/$defs/SetKeyOverrideChange",
+            "set_layout_option": "#/$defs/SetLayoutOptionChange",
+            "set_lighting": "#/$defs/SetLightingChange",
+            "set_macro": "#/$defs/SetMacroChange",
+            "set_qmk_setting": "#/$defs/SetQmkSettingChange",
+            "set_tap_dance": "#/$defs/SetTapDanceChange"
           },
           "propertyName": "type"
         },
@@ -88,6 +641,30 @@
           },
           {
             "$ref": "#/$defs/SetEncoderChange"
+          },
+          {
+            "$ref": "#/$defs/SetLayoutOptionChange"
+          },
+          {
+            "$ref": "#/$defs/SetTapDanceChange"
+          },
+          {
+            "$ref": "#/$defs/SetComboChange"
+          },
+          {
+            "$ref": "#/$defs/SetKeyOverrideChange"
+          },
+          {
+            "$ref": "#/$defs/SetAltRepeatKeyChange"
+          },
+          {
+            "$ref": "#/$defs/SetQmkSettingChange"
+          },
+          {
+            "$ref": "#/$defs/SetMacroChange"
+          },
+          {
+            "$ref": "#/$defs/SetLightingChange"
           }
         ]
       },

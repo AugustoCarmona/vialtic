@@ -12,13 +12,13 @@ this idea was born on friday, october 30, after an extreme day of work. to clear
 
 ## Project status
 
-**Early development, usable for a first test from source.** There is no release, installer or MCP server yet. Implemented so far: a command line tool that reads USB Vial keyboards, renders them as text or PNG, and changes keymap keys and encoders through reviewable proposals with a backup, read-back verification, undo and failure recovery.
+**Early development, usable for a first test from source.** There is no release, installer or MCP server yet. Implemented so far: a command line tool that reads USB Vial keyboards, renders them as text or PNG, and changes every Vial configuration feature the firmware exposes through reviewable proposals with a backup, read-back verification, undo and failure recovery.
 
 | Area | State |
 | --- | --- |
 | Discovery, full read-only snapshot, text and PNG views | Implemented. Read-only use verified on a real Corne on Linux x86_64. |
-| Proposal, approval, write, read-back, undo, recovery for keymap keys and encoders | Implemented and tested on the emulator. One key change, read-back and undo verified on a real Corne on Linux x86_64. Encoders and failure recovery are emulator-tested only. |
-| Other features: macros, tap dance, combos, key overrides, alternate repeat keys, QMK settings, lighting, layout options | Read and backed up. Writing them is planned (M3), and Vialtic refuses it for now. |
+| Proposal, approval, write, read-back, undo, recovery for keymap keys | Implemented and tested on the emulator. One key change, read-back and undo verified on a real Corne on Linux x86_64. Failure recovery is emulator-tested only. |
+| Encoders, layout options, tap dance, combos, key overrides, alternate repeat keys, QMK settings, macros, lighting | Implemented and tested on the emulator only, including a fault sweep. **Not yet verified on any real keyboard.** [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) has the details and [`docs/HARDWARE_TEST.md`](docs/HARDWARE_TEST.md) is the test plan. |
 | Named profiles, `.vil` interchange | Planned (M4). |
 | MCP server for agents | Planned (M5). Agents with terminal access can use the CLI. |
 | Installer, updates, Homebrew | Planned (M6). |
@@ -48,7 +48,7 @@ Changing a key takes a proposal, which writes nothing, followed by an explicit a
 .venv/bin/vialtic undo plan
 ```
 
-Commands, guarantees and limitations are in [`docs/CLI.md`](docs/CLI.md).
+Other features go through a change file, described with commands, guarantees and limitations in [`docs/CLI.md`](docs/CLI.md).
 
 ## Start contributing
 
@@ -65,6 +65,8 @@ Run the tests with `.venv/bin/python -m pytest`. They use the built-in emulator 
 - [Implementation plan and acceptance criteria](docs/PLAN.md)
 - [Current state and handoff](docs/STATUS.md)
 - [CLI contract](docs/CLI.md)
+- [Capability matrix](docs/CAPABILITIES.md)
+- [Hardware test plan](docs/HARDWARE_TEST.md)
 - [Installation contract](docs/INSTALL.md)
 - [Windows implementation guide](docs/WINDOWS.md)
 - [Upstream reuse and attribution](docs/UPSTREAM.md)

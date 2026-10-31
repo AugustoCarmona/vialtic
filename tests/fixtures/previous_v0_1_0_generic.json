@@ -1,0 +1,1185 @@
+{
+  "schema_version": 1,
+  "kind": "snapshot",
+  "created_at": "2026-10-31T20:30:31.242216Z",
+  "device": {
+    "device_id": "dev-68e221c9",
+    "name": "Vialtic Emulator Generic",
+    "vendor_id": "0xfeed",
+    "product_id": "0x0001",
+    "serial_number": "vial:f64c2b3c",
+    "path": "emulator://generic/0",
+    "simulated": true,
+    "vial_uid": "0x00000000000000a1",
+    "via_protocol": 9,
+    "vial_protocol": 6,
+    "layout_fingerprint": "6ee8b3dc9930910ffee7b908b3a4e5e63b17701e51e91c5294a6ccfadc843b46",
+    "binding_id": "2caab2ffe7a112898a7588cd",
+    "identity_confidence": "model_and_firmware",
+    "identity_note": "The USB serial is only the shared Vial marker and the Vial UID identifies the firmware, so identical keyboards cannot be told apart."
+  },
+  "capabilities": {
+    "layers": 4,
+    "rows": 4,
+    "cols": 4,
+    "key_count": 16,
+    "encoder_count": 1,
+    "macro_count": 16,
+    "macro_memory_bytes": 900,
+    "tap_dance_count": 4,
+    "combo_count": 4,
+    "key_override_count": 2,
+    "alt_repeat_key_count": 2,
+    "qmk_settings": [
+      1,
+      2,
+      7
+    ],
+    "unknown_qmk_settings": [],
+    "lighting": "vialrgb",
+    "layout_option_labels": [
+      "Wide bottom key"
+    ],
+    "supported_features": [
+      "caps_word",
+      "layer_lock",
+      "persistent_default_layer",
+      "repeat_key"
+    ],
+    "custom_keycode_count": 0,
+    "midi": null,
+    "writable_operations": [
+      "set_key",
+      "set_encoder"
+    ]
+  },
+  "layout": {
+    "keys": [
+      {
+        "id": "0,0",
+        "row": 0,
+        "col": 0,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 0.0,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "0,1",
+        "row": 0,
+        "col": 1,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 1.0,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "0,2",
+        "row": 0,
+        "col": 2,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 2.0,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "0,3",
+        "row": 0,
+        "col": 3,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 3.0,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "1,0",
+        "row": 1,
+        "col": 0,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 0.0,
+        "y": 1.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "1,1",
+        "row": 1,
+        "col": 1,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 1.0,
+        "y": 1.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "1,2",
+        "row": 1,
+        "col": 2,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 2.0,
+        "y": 1.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "1,3",
+        "row": 1,
+        "col": 3,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 3.0,
+        "y": 1.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "2,0",
+        "row": 2,
+        "col": 0,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 0.0,
+        "y": 2.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "2,1",
+        "row": 2,
+        "col": 1,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 1.0,
+        "y": 2.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "2,2",
+        "row": 2,
+        "col": 2,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 2.0,
+        "y": 2.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "2,3",
+        "row": 2,
+        "col": 3,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 3.0,
+        "y": 2.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "3,0",
+        "row": 3,
+        "col": 0,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 0.0,
+        "y": 3.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": 0,
+        "layout_option": 0,
+        "decal": false
+      },
+      {
+        "id": "3,1",
+        "row": 3,
+        "col": 1,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 1.0,
+        "y": 3.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": 0,
+        "layout_option": 0,
+        "decal": false
+      },
+      {
+        "id": "3,2",
+        "row": 3,
+        "col": 2,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 2.0,
+        "y": 3.0,
+        "width": 2.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 2.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": 0,
+        "layout_option": 0,
+        "decal": false
+      },
+      {
+        "id": "3,0",
+        "row": 3,
+        "col": 0,
+        "encoder_index": null,
+        "encoder_direction": null,
+        "x": 0.0,
+        "y": 4.5,
+        "width": 4.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 4.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": 0,
+        "layout_option": 1,
+        "decal": false
+      }
+    ],
+    "encoders": [
+      {
+        "id": "enc0:0",
+        "row": null,
+        "col": null,
+        "encoder_index": 0,
+        "encoder_direction": 0,
+        "x": 4.5,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      },
+      {
+        "id": "enc0:1",
+        "row": null,
+        "col": null,
+        "encoder_index": 0,
+        "encoder_direction": 1,
+        "x": 5.5,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 1.0,
+        "x2": 0.0,
+        "y2": 0.0,
+        "width2": 1.0,
+        "height2": 1.0,
+        "rotation_x": 0.0,
+        "rotation_y": 0.0,
+        "rotation_angle": 0.0,
+        "layout_index": -1,
+        "layout_option": -1,
+        "decal": false
+      }
+    ],
+    "layout_options": 1,
+    "layout_choices": [
+      1
+    ]
+  },
+  "configuration": {
+    "keymap": [
+      {
+        "raw": 4,
+        "keycode": "KC_A",
+        "label": "A",
+        "layer": 0,
+        "row": 0,
+        "col": 0
+      },
+      {
+        "raw": 5,
+        "keycode": "KC_B",
+        "label": "B",
+        "layer": 0,
+        "row": 0,
+        "col": 1
+      },
+      {
+        "raw": 6,
+        "keycode": "KC_C",
+        "label": "C",
+        "layer": 0,
+        "row": 0,
+        "col": 2
+      },
+      {
+        "raw": 7,
+        "keycode": "KC_D",
+        "label": "D",
+        "layer": 0,
+        "row": 0,
+        "col": 3
+      },
+      {
+        "raw": 8,
+        "keycode": "KC_E",
+        "label": "E",
+        "layer": 0,
+        "row": 1,
+        "col": 0
+      },
+      {
+        "raw": 9,
+        "keycode": "KC_F",
+        "label": "F",
+        "layer": 0,
+        "row": 1,
+        "col": 1
+      },
+      {
+        "raw": 10,
+        "keycode": "KC_G",
+        "label": "G",
+        "layer": 0,
+        "row": 1,
+        "col": 2
+      },
+      {
+        "raw": 11,
+        "keycode": "KC_H",
+        "label": "H",
+        "layer": 0,
+        "row": 1,
+        "col": 3
+      },
+      {
+        "raw": 12,
+        "keycode": "KC_I",
+        "label": "I",
+        "layer": 0,
+        "row": 2,
+        "col": 0
+      },
+      {
+        "raw": 13,
+        "keycode": "KC_J",
+        "label": "J",
+        "layer": 0,
+        "row": 2,
+        "col": 1
+      },
+      {
+        "raw": 14,
+        "keycode": "KC_K",
+        "label": "K",
+        "layer": 0,
+        "row": 2,
+        "col": 2
+      },
+      {
+        "raw": 15,
+        "keycode": "KC_L",
+        "label": "L",
+        "layer": 0,
+        "row": 2,
+        "col": 3
+      },
+      {
+        "raw": 16,
+        "keycode": "KC_M",
+        "label": "M",
+        "layer": 0,
+        "row": 3,
+        "col": 0
+      },
+      {
+        "raw": 17,
+        "keycode": "KC_N",
+        "label": "N",
+        "layer": 0,
+        "row": 3,
+        "col": 1
+      },
+      {
+        "raw": 18,
+        "keycode": "KC_O",
+        "label": "O",
+        "layer": 0,
+        "row": 3,
+        "col": 2
+      },
+      {
+        "raw": 30,
+        "keycode": "KC_1",
+        "label": "1",
+        "layer": 1,
+        "row": 0,
+        "col": 0
+      },
+      {
+        "raw": 31,
+        "keycode": "KC_2",
+        "label": "2",
+        "layer": 1,
+        "row": 0,
+        "col": 1
+      },
+      {
+        "raw": 32,
+        "keycode": "KC_3",
+        "label": "3",
+        "layer": 1,
+        "row": 0,
+        "col": 2
+      },
+      {
+        "raw": 33,
+        "keycode": "KC_4",
+        "label": "4",
+        "layer": 1,
+        "row": 0,
+        "col": 3
+      },
+      {
+        "raw": 34,
+        "keycode": "KC_5",
+        "label": "5",
+        "layer": 1,
+        "row": 1,
+        "col": 0
+      },
+      {
+        "raw": 35,
+        "keycode": "KC_6",
+        "label": "6",
+        "layer": 1,
+        "row": 1,
+        "col": 1
+      },
+      {
+        "raw": 36,
+        "keycode": "KC_7",
+        "label": "7",
+        "layer": 1,
+        "row": 1,
+        "col": 2
+      },
+      {
+        "raw": 37,
+        "keycode": "KC_8",
+        "label": "8",
+        "layer": 1,
+        "row": 1,
+        "col": 3
+      },
+      {
+        "raw": 38,
+        "keycode": "KC_9",
+        "label": "9",
+        "layer": 1,
+        "row": 2,
+        "col": 0
+      },
+      {
+        "raw": 39,
+        "keycode": "KC_0",
+        "label": "0",
+        "layer": 1,
+        "row": 2,
+        "col": 1
+      },
+      {
+        "raw": 30,
+        "keycode": "KC_1",
+        "label": "1",
+        "layer": 1,
+        "row": 2,
+        "col": 2
+      },
+      {
+        "raw": 31,
+        "keycode": "KC_2",
+        "label": "2",
+        "layer": 1,
+        "row": 2,
+        "col": 3
+      },
+      {
+        "raw": 32,
+        "keycode": "KC_3",
+        "label": "3",
+        "layer": 1,
+        "row": 3,
+        "col": 0
+      },
+      {
+        "raw": 33,
+        "keycode": "KC_4",
+        "label": "4",
+        "layer": 1,
+        "row": 3,
+        "col": 1
+      },
+      {
+        "raw": 34,
+        "keycode": "KC_5",
+        "label": "5",
+        "layer": 1,
+        "row": 3,
+        "col": 2
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 0,
+        "col": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 0,
+        "col": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 0,
+        "col": 2
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 0,
+        "col": 3
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 1,
+        "col": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 1,
+        "col": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 1,
+        "col": 2
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 1,
+        "col": 3
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 2,
+        "col": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 2,
+        "col": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 2,
+        "col": 2
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 2,
+        "col": 3
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 3,
+        "col": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 3,
+        "col": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "row": 3,
+        "col": 2
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 0,
+        "col": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 0,
+        "col": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 0,
+        "col": 2
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 0,
+        "col": 3
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 1,
+        "col": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 1,
+        "col": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 1,
+        "col": 2
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 1,
+        "col": 3
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 2,
+        "col": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 2,
+        "col": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 2,
+        "col": 2
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 2,
+        "col": 3
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 3,
+        "col": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 3,
+        "col": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "row": 3,
+        "col": 2
+      }
+    ],
+    "encoders": [
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 0,
+        "index": 0,
+        "direction": 0
+      },
+      {
+        "raw": 128,
+        "keycode": "KC__VOLUP",
+        "label": "VOLUP",
+        "layer": 0,
+        "index": 0,
+        "direction": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 1,
+        "index": 0,
+        "direction": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 1,
+        "index": 0,
+        "direction": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "index": 0,
+        "direction": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 2,
+        "index": 0,
+        "direction": 1
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "index": 0,
+        "direction": 0
+      },
+      {
+        "raw": 1,
+        "keycode": "KC_TRNS",
+        "label": "___",
+        "layer": 3,
+        "index": 0,
+        "direction": 1
+      }
+    ],
+    "layout_options": 1,
+    "macros": {
+      "count": 16,
+      "memory_bytes": 900,
+      "used_bytes": 31,
+      "redacted": false,
+      "buffer_b64": "aGkBAQQAY2Fm6QABCWp1bmsAAAAAAAAAAAAAAAAAAA==",
+      "macros": [
+        [
+          [
+            "text",
+            "hi"
+          ],
+          [
+            "tap",
+            "KC_A"
+          ]
+        ],
+        [
+          [
+            "text",
+            "café"
+          ]
+        ],
+        [
+          [
+            "text",
+            "junk"
+          ]
+        ],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    "tap_dance": [
+      [
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        200
+      ],
+      [
+        "KC_A",
+        "KC_B",
+        "KC_C",
+        "KC_D",
+        150
+      ],
+      [
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        200
+      ],
+      [
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        200
+      ]
+    ],
+    "combos": [
+      [
+        "KC_A",
+        "KC_B",
+        "KC_NO",
+        "KC_NO",
+        "KC_C"
+      ],
+      [
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        "KC_NO"
+      ],
+      [
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        "KC_NO"
+      ],
+      [
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        "KC_NO",
+        "KC_NO"
+      ]
+    ],
+    "key_overrides": [
+      {
+        "trigger": "KC_A",
+        "replacement": "KC_B",
+        "layers": 65535,
+        "trigger_mods": 1,
+        "negative_mod_mask": 0,
+        "suppressed_mods": 1,
+        "options": 129
+      },
+      {
+        "trigger": "KC_NO",
+        "replacement": "KC_NO",
+        "layers": 65535,
+        "trigger_mods": 0,
+        "negative_mod_mask": 0,
+        "suppressed_mods": 0,
+        "options": 0
+      }
+    ],
+    "alt_repeat_keys": [
+      {
+        "keycode": "KC_NO",
+        "alt_keycode": "KC_NO",
+        "allowed_mods": 0,
+        "options": 0
+      },
+      {
+        "keycode": "KC_A",
+        "alt_keycode": "KC_B",
+        "allowed_mods": 0,
+        "options": 9
+      }
+    ],
+    "settings": {
+      "values": {
+        "1": 3,
+        "2": 0,
+        "7": 175
+      },
+      "unknown_qsids": []
+    },
+    "lighting": {
+      "kind": "vialrgb",
+      "rgblight": null,
+      "backlight": null,
+      "vialrgb": {
+        "mode": 2,
+        "speed": 90,
+        "hue": 16,
+        "saturation": 32,
+        "value": 64,
+        "maximum_brightness": 128,
+        "supported_effects": [
+          0,
+          1,
+          2,
+          3
+        ]
+      }
+    }
+  },
+  "family_fingerprints": {
+    "keymap": "b23c8d1092c3b718064dd162072ab7fc4ef22e71430c9642db5a1f1bf5a6336b",
+    "encoders": "695ba35c908ef685bbde9e637e5b4e3e4f12d903850a200fc866c8cdd6c91600",
+    "layout_options": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+    "macros": "63b14745b6f73845775bb5db28f3786dcae5b09dc8a526630dad90257e9d6256",
+    "tap_dance": "afa4fd0acdd551560fa6fba7bc1c830625658e7d48d9b042a755908b29b6a8ce",
+    "combos": "2a3c315a0e32d18aaa861bb1eca180978c168423a0be622e6947e9bbcdbb206f",
+    "key_overrides": "44c29770841c4504c9995491e4dc25e6603cd31ff96c370b9a12138c3f96ec91",
+    "alt_repeat_keys": "9419c79ecec2c54a6b6ff844022abfa0abc3afe84a49b6915456f3b3da23ba02",
+    "settings": "406f2eed10ecade2b13eb6458b19988730094d5b07877205361309f12564e62d",
+    "lighting": "30931f724b97b8cb3ec7c6cf371fb6b416f5c9ab6e2ca0daca6270d9bce2508f"
+  },
+  "coverage": {
+    "keymap": "complete",
+    "encoders": "complete",
+    "layout_options": "complete",
+    "macros": "complete",
+    "tap_dance": "complete",
+    "combos": "complete",
+    "key_overrides": "complete",
+    "alt_repeat_keys": "complete",
+    "settings": "complete",
+    "lighting": "complete"
+  },
+  "warnings": []
+}

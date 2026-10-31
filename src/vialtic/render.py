@@ -14,6 +14,7 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 
 from .models import KeyGeometry, Proposal, Snapshot
+from .proposals import describe_operation
 
 TEXT_LEGEND = ("Legend: ___ transparent (uses the layer below)  XXX disabled (KC_NO)  r,c matrix position  "
                "~ rotated key, approximate position  * changed by the proposal  ! hold to unlock")
@@ -103,7 +104,7 @@ def layer_cells(snapshot: Snapshot, layer: int, proposal: Proposal | None,
         if e.layer == layer:
             cells[f"enc{e.index}:{e.direction}"] = Cell(e.label, e.keycode)
     for op in (proposal.operations if proposal else []):
-        if op.layer != layer:
+        if op.type not in ("set_key", "set_encoder") or op.layer != layer:
             continue
         key = f"{op.row},{op.col}" if op.type == "set_key" else f"enc{op.index}:{op.direction}"
         if key in cells:
@@ -227,9 +228,12 @@ def render_text(snapshot: Snapshot, layers: list[int], proposal: Proposal | None
     if proposal is not None:
         parts.append(f"Proposed changes in {proposal.id}:")
         for op in proposal.operations:
-            where = f"layer {op.layer} key {op.row},{op.col}" if op.type == "set_key" else (
-                f"layer {op.layer} encoder {op.index} direction {op.direction}")
-            parts.append(f"  {where}  before: {op.before.keycode}  after: {op.after.keycode}")
+            if op.type in ("set_key", "set_encoder"):
+                where = f"layer {op.layer} key {op.row},{op.col}" if op.type == "set_key" else (
+                    f"layer {op.layer} encoder {op.index} direction {op.direction}")
+                parts.append(f"  {where}  before: {op.before.keycode}  after: {op.after.keycode}")
+            else:
+                parts.append(f"  {describe_operation(op)}")
         parts.append("Keys marked * show the value after the proposal.")
     if highlights:
         parts.append("Hold to unlock: " + ", ".join(f"{r},{c}" for r, c in highlights))

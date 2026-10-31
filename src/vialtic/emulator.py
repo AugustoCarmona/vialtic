@@ -26,6 +26,7 @@ from .storage import atomic_write
 proto = va.proto
 
 RELEASE = 0x0100
+UNHANDLED = 0xFF  # id_unhandled: what firmware answers to a command it does not implement
 
 
 def _key(label: str, **props) -> list[Any]:
@@ -71,6 +72,30 @@ LEGACY_DEFINITION = {
 }
 
 
+FULL_DEFINITION = {
+    "name": "Vialtic Full", "lighting": "vialrgb", "matrix": {"rows": 2, "cols": 3},
+    "customKeycodes": [{"name": "MY_KEY", "title": "My key", "shortName": "Mine"}],
+    "layouts": {
+        "labels": ["Split backspace", ["Bottom row", "ANSI", "ISO", "Compact"]],
+        "keymap": [
+            ["0,0", "0,1\n\n\n0,0", {"x": 0.5}, "0,0\n\n\n\n\n\n\n\n\ne", "0,1\n\n\n\n\n\n\n\n\ne",
+             "1,0\n\n\n\n\n\n\n\n\ne", "1,1\n\n\n\n\n\n\n\n\ne"],
+            ["1,0\n\n\n1,0", "1,1\n\n\n1,1", "1,2\n\n\n1,2"],
+        ],
+    },
+}
+
+DUAL_DEFINITION = {
+    "name": "Vialtic Dual", "lighting": "qmk_backlight_rgblight", "matrix": {"rows": 1, "cols": 2},
+    "layouts": {"keymap": [["0,0", "0,1"]]},
+}
+
+MINIMAL_DEFINITION = {
+    "name": "Vialtic Minimal", "matrix": {"rows": 1, "cols": 2},
+    "layouts": {"keymap": [["0,0", "0,1"]]},
+}
+
+
 @dataclass(frozen=True)
 class DeviceSpec:
     definition: dict[str, Any]
@@ -90,7 +115,11 @@ class DeviceSpec:
     alt_repeat_key_count: int = 2
     settings: tuple[int, ...] = (1, 2, 7)
     unlock_keys: tuple[tuple[int, int], ...] = ((0, 0), (0, 1))
+    backlight_levels: int = 3  # QMK's default
 
+
+# Every qsid in the pinned table: widths of 1, 2 and 4 bytes, plain booleans and bit fields.
+ALL_QSIDS = tuple(sorted(va.QmkSettings.qsid_fields))
 
 SCENARIOS: dict[str, list[DeviceSpec]] = {
     "generic": [DeviceSpec(GENERIC_DEFINITION, "Generic", uid=0xA1)],
@@ -103,6 +132,16 @@ SCENARIOS: dict[str, list[DeviceSpec]] = {
     "legacy": [DeviceSpec(LEGACY_DEFINITION, "Legacy", uid=0xC3, vial_protocol=5, macro_memory=128, macro_count=2,
                           tap_dance_count=0, combo_count=0, key_override_count=0, alt_repeat_key_count=0)],
     "future": [DeviceSpec(GENERIC_DEFINITION, "Future", uid=0xD4, vial_protocol=99)],
+    # Every configuration family at once, small enough for exhaustive fault sweeps.
+    "full": [DeviceSpec(FULL_DEFINITION, "Full", uid=0xE5, layers=2, macro_count=4, macro_memory=64, tap_dance_count=2,
+                        combo_count=2, key_override_count=2, alt_repeat_key_count=2, settings=ALL_QSIDS)],
+    "dual": [DeviceSpec(DUAL_DEFINITION, "Dual", uid=0xE6, layers=2, settings=())],
+    # Keys and nothing else: every other family must answer with a capability error.
+    "minimal": [DeviceSpec(MINIMAL_DEFINITION, "Minimal", uid=0xE7, layers=2, macro_count=0, macro_memory=0, tap_dance_count=0,
+                           combo_count=0, key_override_count=0, alt_repeat_key_count=0, settings=())],
+    # Vial protocol 1: no delays or 16-bit codes in macros, no dynamic entries and no QMK settings.
+    "vintage": [DeviceSpec(LEGACY_DEFINITION, "Vintage", uid=0xE8, vial_protocol=1, macro_count=2, macro_memory=32,
+                           tap_dance_count=0, combo_count=0, key_override_count=0, alt_repeat_key_count=0, settings=())],
 }
 
 
@@ -118,6 +157,8 @@ class Faults:
     disconnect_only_device: int | None = None
     fail_lock: bool = False
     unlock_never: bool = False
+    settings_status_fail: tuple[int, ...] = ()  # qsids whose SET answers a nonzero status and stores nothing
+    settings_get_fail: tuple[int, ...] = ()  # qsids whose GET answers a nonzero status
 
     @classmethod
     def from_env(cls) -> "Faults":
@@ -146,9 +187,21 @@ def _initial_keymap(spec: DeviceSpec) -> bytes:
     return bytes(cells)
 
 
+INITIAL_LIGHTING = {"rgb_brightness": 128, "rgb_effect": 1, "rgb_enabled": True, "rgb_speed": 5, "rgb_h": 32, "rgb_s": 64,
+                    "bl_brightness": 85, "bl_effect": 0, "mode": 2, "speed": 90, "h": 16, "s": 32, "v": 64}
+VIALRGB_EFFECTS = (1, 2, 3)
+VIALRGB_MAX_BRIGHTNESS = 128
+RGBLIGHT_MODES = 35
+RGBLIGHT_BREATHING = range(2, 6)
+RGBLIGHT_FIXED_HUE = range(6, 15)  # rainbow mood and swirl
+# All that firmware honours while an unlock is in progress. Anything else is echoed back unchanged.
+DURING_UNLOCK = {proto.CMD_VIAL_GET_KEYBOARD_ID, proto.CMD_VIAL_GET_SIZE, proto.CMD_VIAL_GET_DEFINITION,
+                 proto.CMD_VIAL_GET_UNLOCK_STATUS, proto.CMD_VIAL_UNLOCK_START, proto.CMD_VIAL_UNLOCK_POLL}
+
+
 def _initial_state(spec: DeviceSpec) -> dict[str, Any]:
     labels = spec.definition["layouts"].get("labels") or []
-    encoders = max([0] + [1 for row in spec.definition["layouts"]["keymap"] for k in row
+    encoders = max([0] + [int(k.split(",")[0]) + 1 for row in spec.definition["layouts"]["keymap"] for k in row
                           if isinstance(k, str) and k.endswith("\ne")])
     qsids = {str(q): 0 for q in spec.settings}
     macro = b"\x00" * spec.macro_count
@@ -162,8 +215,8 @@ def _initial_state(spec: DeviceSpec) -> dict[str, Any]:
         "key_overrides": [[0, 0, 0xFFFF, 0, 0, 0, 0] for _ in range(spec.key_override_count)],
         "alt_repeat": [[0, 0, 0, 0] for _ in range(spec.alt_repeat_key_count)],
         "settings": qsids,
-        "lighting": {"rgb_brightness": 128, "rgb_effect": 1, "rgb_speed": 5, "rgb_h": 32, "rgb_s": 64,
-                     "bl_brightness": 42, "bl_effect": 0, "mode": 2, "speed": 90, "h": 16, "s": 32, "v": 64},
+        "lighting": dict(INITIAL_LIGHTING),
+        "lighting_saved": dict(INITIAL_LIGHTING),
         "unlocked": False,
         "unlock_in_progress": False,
         "unlock_counter": 0,
@@ -182,6 +235,15 @@ class Firmware:
         self.macro = bytearray(base64.b64decode(state["macro"]))
         self.definition = lzma.compress(json.dumps(spec.definition).encode())
         self.unlock_never = False
+        self.settings_status_fail: tuple[int, ...] = ()
+        self.settings_get_fail: tuple[int, ...] = ()
+        state.setdefault("lighting_saved", dict(state["lighting"]))
+
+    def power_cycle(self) -> None:
+        """What a replug does: the firmware locks and lighting returns to its saved values."""
+        self.state["unlocked"], self.state["unlock_in_progress"], self.state["unlock_counter"] = False, False, 0
+        self.state["lighting"] = dict(self.state["lighting_saved"])
+        self.sync()
 
     def sync(self) -> None:
         self.state["keymap"] = base64.b64encode(bytes(self.keymap)).decode()
@@ -195,15 +257,27 @@ class Firmware:
         tables = va.keycode_tables
         return (tables.keycodes_v6 if self.spec.vial_protocol == 6 else tables.keycodes_v5).kc[va.RESET_KEYCODE]
 
+    def firewall(self, code: int) -> int:
+        """vial_keycode_firewall: while locked the firmware stores KC_NO instead of QK_BOOT, without saying so."""
+        return 0 if code == self.boot_code and not self.state["unlocked"] else code
+
     def handle(self, msg: bytes) -> bytes:
         resp = bytearray(msg.ljust(va.MSG_LEN, b"\x00"))
         cmd = msg[0]
+        if self.state["unlock_in_progress"] and not (cmd == proto.CMD_VIA_VIAL_PREFIX and msg[1] in DURING_UNLOCK):
+            return bytes(resp)
         if cmd == proto.CMD_VIA_GET_PROTOCOL_VERSION:
             resp[1:3] = struct.pack(">H", self.spec.via_protocol)
         elif cmd == proto.CMD_VIA_GET_KEYBOARD_VALUE:
-            resp[2:6] = struct.pack(">I", max(self.state["layout_options"], 0))
+            if msg[1] == proto.VIA_LAYOUT_OPTIONS:
+                resp[2:6] = struct.pack(">I", max(self.state["layout_options"], 0))
+            else:
+                resp[0] = UNHANDLED
         elif cmd == proto.CMD_VIA_SET_KEYBOARD_VALUE:
-            self.state["layout_options"] = struct.unpack(">I", msg[2:6])[0]
+            if msg[1] == proto.VIA_LAYOUT_OPTIONS:
+                self.state["layout_options"] = struct.unpack(">I", msg[2:6])[0]
+            else:
+                resp[0] = UNHANDLED
         elif cmd == proto.CMD_VIA_GET_LAYER_COUNT:
             resp[1] = self.spec.layers
         elif cmd == proto.CMD_VIA_KEYMAP_GET_BUFFER:
@@ -221,13 +295,16 @@ class Firmware:
             offset, size = struct.unpack(">HB", msg[1:4])
             resp[4:4 + size] = self.macro[offset:offset + size]
         elif cmd == proto.CMD_VIA_MACRO_SET_BUFFER:
-            if self.state["unlocked"]:
-                offset, size = struct.unpack(">HB", msg[1:4])
+            offset, size = struct.unpack(">HB", msg[1:4])
+            # Locked firmware ignores macro writes without reporting it, and out of range ones are dropped.
+            if self.state["unlocked"] and offset + size <= self.spec.macro_memory:
                 self.macro[offset:offset + size] = msg[4:4 + size]
         elif cmd == proto.CMD_VIA_LIGHTING_GET_VALUE:
             self._lighting_get(msg, resp)
         elif cmd == proto.CMD_VIA_LIGHTING_SET_VALUE:
             self._lighting_set(msg)
+        elif cmd == proto.CMD_VIA_LIGHTING_SAVE:
+            self.state["lighting_saved"] = dict(self.state["lighting"])
         elif cmd == proto.CMD_VIA_VIAL_PREFIX:
             self._vial(msg, resp)
         return bytes(resp)
@@ -238,7 +315,7 @@ class Firmware:
         if sub == proto.QMK_RGBLIGHT_BRIGHTNESS:
             resp[2] = light["rgb_brightness"]
         elif sub == proto.QMK_RGBLIGHT_EFFECT:
-            resp[2] = light["rgb_effect"]
+            resp[2] = light["rgb_effect"] if light.setdefault("rgb_enabled", True) else 0
         elif sub == proto.QMK_RGBLIGHT_EFFECT_SPEED:
             resp[2] = light["rgb_speed"]
         elif sub == proto.QMK_RGBLIGHT_COLOR:
@@ -248,27 +325,48 @@ class Firmware:
         elif sub == proto.QMK_BACKLIGHT_EFFECT:
             resp[2] = light["bl_effect"]
         elif sub == proto.VIALRGB_GET_INFO:
-            resp[2:5] = struct.pack("<HB", 1, 128)
+            resp[2:5] = struct.pack("<HB", 1, VIALRGB_MAX_BRIGHTNESS)
         elif sub == proto.VIALRGB_GET_MODE:
             resp[2:8] = struct.pack("<HBBBB", light["mode"], light["speed"], light["h"], light["s"], light["v"])
         elif sub == proto.VIALRGB_GET_SUPPORTED:
             cur = struct.unpack("<H", msg[2:4])[0]
-            effects = [e for e in (1, 2, 3) if e > cur]
+            effects = [e for e in VIALRGB_EFFECTS if e > cur]
             payload = effects + [0xFFFF] * (15 - len(effects))
             resp[2:32] = struct.pack("<15H", *payload)
 
     def _lighting_set(self, msg: bytes) -> None:
         light = self.state["lighting"]
         sub = msg[1]
-        names = {proto.QMK_RGBLIGHT_BRIGHTNESS: "rgb_brightness", proto.QMK_RGBLIGHT_EFFECT: "rgb_effect",
-                 proto.QMK_RGBLIGHT_EFFECT_SPEED: "rgb_speed", proto.QMK_BACKLIGHT_BRIGHTNESS: "bl_brightness",
-                 proto.QMK_BACKLIGHT_EFFECT: "bl_effect"}
-        if sub in names:
-            light[names[sub]] = msg[2]
+        enabled = light.setdefault("rgb_enabled", True)
+        if sub == proto.QMK_RGBLIGHT_BRIGHTNESS:
+            # rgblight_sethsv_noeeprom does nothing while off, and keeps brightness while breathing.
+            if enabled and light["rgb_effect"] not in RGBLIGHT_BREATHING:
+                light["rgb_brightness"] = msg[2]
+        elif sub == proto.QMK_RGBLIGHT_EFFECT:
+            # rgblight_mode_noeeprom: ignored while off, clamped otherwise. Then 0 turns off and anything else on.
+            if enabled:
+                light["rgb_effect"] = min(max(msg[2], 1), RGBLIGHT_MODES)
+            light["rgb_enabled"] = msg[2] != 0
+        elif sub == proto.QMK_RGBLIGHT_EFFECT_SPEED:
+            light["rgb_speed"] = msg[2]
+        elif sub == proto.QMK_BACKLIGHT_BRIGHTNESS:
+            # Firmware keeps a level, not the byte it was given.
+            level = msg[2] * self.spec.backlight_levels // 255
+            light["bl_brightness"] = level * 255 // self.spec.backlight_levels
+        elif sub == proto.QMK_BACKLIGHT_EFFECT:
+            light["bl_effect"] = 1 if msg[2] else 0  # breathing on or off
         elif sub == proto.QMK_RGBLIGHT_COLOR:
-            light["rgb_h"], light["rgb_s"] = msg[2], msg[3]
+            if enabled:  # and keeps hue in the rainbow effects
+                light["rgb_h"] = light["rgb_h"] if light["rgb_effect"] in RGBLIGHT_FIXED_HUE else msg[2]
+                light["rgb_s"] = msg[3]
         elif sub == proto.VIALRGB_SET_MODE:
-            light["mode"], light["speed"], light["h"], light["s"], light["v"] = struct.unpack("<HBBBB", msg[2:8])
+            mode, speed, hue, saturation, value = struct.unpack("<HBBBB", msg[2:8])
+            # Like the firmware: unknown effects are ignored and brightness is clamped.
+            if mode == 0 or mode in VIALRGB_EFFECTS:
+                light["mode"] = mode
+            # rgb_matrix ignores speed and colour while disabled.
+            if light["mode"] != 0:
+                light["speed"], light["h"], light["s"], light["v"] = speed, hue, saturation, min(value, VIALRGB_MAX_BRIGHTNESS)
 
     def _vial(self, msg: bytes, resp: bytearray) -> None:
         sub = msg[1]
@@ -283,7 +381,7 @@ class Firmware:
             codes = self.state["encoders"]
             resp[0:4] = struct.pack(">HH", codes[f"{msg[2]}:{msg[3]}:0"], codes[f"{msg[2]}:{msg[3]}:1"])
         elif sub == proto.CMD_VIAL_SET_ENCODER:
-            self.state["encoders"][f"{msg[2]}:{msg[3]}:{msg[4]}"] = struct.unpack(">H", msg[5:7])[0]
+            self.state["encoders"][f"{msg[2]}:{msg[3]}:{msg[4]}"] = self.firewall(struct.unpack(">H", msg[5:7])[0])
         elif sub == proto.CMD_VIAL_GET_UNLOCK_STATUS:
             resp[0:32] = b"\xff" * 32
             resp[0], resp[1] = int(self.state["unlocked"]), int(self.state["unlock_in_progress"])
@@ -302,16 +400,30 @@ class Firmware:
             self.state["unlocked"], self.state["unlock_in_progress"] = False, False
         elif sub == proto.CMD_VIAL_QMK_SETTINGS_QUERY:
             cur = struct.unpack("<H", msg[2:4])[0]
-            ids = [int(q) for q in sorted(self.state["settings"], key=int) if int(q) > cur or cur == 0]
+            ids = [int(q) for q in sorted(self.state["settings"], key=int) if int(q) > cur][:16]
             resp[0:32] = struct.pack("<16H", *(ids + [0xFFFF] * (16 - len(ids))))
         elif sub == proto.CMD_VIAL_QMK_SETTINGS_GET:
-            value = self.state["settings"].get(str(struct.unpack("<H", msg[2:4])[0]))
-            resp[0] = 0 if value is not None else 1
+            qsid = struct.unpack("<H", msg[2:4])[0]
+            value = self.state["settings"].get(str(qsid))
+            resp[0:32] = bytes(32)
+            resp[0] = 0 if value is not None and qsid not in self.settings_get_fail else 1
             resp[1:5] = struct.pack("<I", value or 0)
         elif sub == proto.CMD_VIAL_QMK_SETTINGS_SET:
-            self.state["settings"][str(struct.unpack("<H", msg[2:4])[0])] = struct.unpack("<H", msg[4:6])[0]
+            qsid = struct.unpack("<H", msg[2:4])[0]
+            width = self._setting_width(qsid)
+            resp[0:32] = bytes(32)
+            if width is None or str(qsid) not in self.state["settings"] or qsid in self.settings_status_fail:
+                resp[0] = 1
+            else:
+                self.state["settings"][str(qsid)] = int.from_bytes(msg[4:4 + width], "little")
         elif sub == proto.CMD_VIAL_DYNAMIC_ENTRY_OP:
             self._dynamic(msg, resp)
+
+    @staticmethod
+    def _setting_width(qsid: int) -> int | None:
+        """Firmware stores each setting in a fixed width, which the pinned table mirrors."""
+        fields = va.QmkSettings.qsid_fields.get(qsid) if va.QmkSettings.is_qsid_supported(qsid) else None
+        return fields[0].get("width", 1) if fields else None
 
     def _dynamic(self, msg: bytes, resp: bytearray) -> None:
         op = msg[2]
@@ -329,10 +441,17 @@ class Firmware:
             proto.DYNAMIC_VIAL_KEY_OVERRIDE_SET: ("key_overrides", "<HHHBBBB"),
             proto.DYNAMIC_VIAL_ALT_REPEAT_KEY_GET: ("alt_repeat", "<HHBB"), proto.DYNAMIC_VIAL_ALT_REPEAT_KEY_SET: ("alt_repeat", "<HHBB"),
         }
+        firewalled = {proto.DYNAMIC_VIAL_TAP_DANCE_SET: (0, 1, 2, 3), proto.DYNAMIC_VIAL_COMBO_SET: (4,),
+                      proto.DYNAMIC_VIAL_KEY_OVERRIDE_SET: (1,), proto.DYNAMIC_VIAL_ALT_REPEAT_KEY_SET: (0, 1)}
         table, fmt = tables[op]
-        if op in (proto.DYNAMIC_VIAL_TAP_DANCE_SET, proto.DYNAMIC_VIAL_COMBO_SET, proto.DYNAMIC_VIAL_KEY_OVERRIDE_SET,
-                  proto.DYNAMIC_VIAL_ALT_REPEAT_KEY_SET):
-            self.state[table][idx] = list(struct.unpack(fmt, msg[4:4 + struct.calcsize(fmt)]))
+        if idx >= len(self.state[table]):
+            resp[0] = 1
+        elif op in firewalled:
+            entry = list(struct.unpack(fmt, msg[4:4 + struct.calcsize(fmt)]))
+            for position in firewalled[op]:
+                entry[position] = self.firewall(entry[position])
+            self.state[table][idx] = entry
+            resp[0] = 0
         else:
             resp[0] = 0
             resp[1:1 + struct.calcsize(fmt)] = struct.pack(fmt, *self.state[table][idx])
@@ -353,6 +472,8 @@ class EmulatedHandle:
         if self.closed or backend.is_disconnected(self.index):
             raise OSError("device disconnected")
         msg = bytes(data[1:])  # drop report id
+        if backend.packet_hook is not None:
+            backend.packet_hook(msg)
         if backend.faults.fail_lock and msg[:2] == bytes([proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_LOCK]):
             raise OSError("lock refused")
         mutating = classify_packet(msg) == "write"
@@ -400,6 +521,7 @@ class EmulatorBackend:
         self.writes_seen = 0
         self.disconnected_at: float | None = None
         self.reconnected = False
+        self.packet_hook: Any = None  # test seam: called with every outgoing packet, may raise
         self.states = self._load()
         self._firmware: dict[int, Firmware] = {}
 
@@ -417,6 +539,8 @@ class EmulatorBackend:
         if index not in self._firmware:
             firmware = Firmware(self.specs[index], self.states[index])
             firmware.unlock_never = self.faults.unlock_never
+            firmware.settings_status_fail = tuple(self.faults.settings_status_fail)
+            firmware.settings_get_fail = tuple(self.faults.settings_get_fail)
             self._firmware[index] = firmware
         return self._firmware[index]
 
@@ -426,6 +550,11 @@ class EmulatorBackend:
     def disconnect(self) -> None:
         self.disconnected_at = time.monotonic()
         self.faults.disconnect_after_writes = None
+        only = self.faults.disconnect_only_device
+        for index in range(len(self.specs)):
+            if only is None or index == only:
+                self.firmware(index).power_cycle()
+        self.save()
 
     def is_disconnected(self, index: int | None = None) -> bool:
         if self.disconnected_at is None:
