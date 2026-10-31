@@ -86,7 +86,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="assign a key, e.g. 1:0,2=LGUI(KC_3); repeatable")
     plan.add_argument("--set-encoder", dest="set_encoders", action="append", metavar="L:I:D=KEYCODE", default=[],
                       help="assign an encoder direction; repeatable")
-    plan.add_argument("--changes", metavar="FILE", help="read a change_set JSON file, or - for stdin")
+    plan.add_argument("--changes", metavar="FILE",
+                      help="read a change_set JSON file, or - for stdin; needed for every feature except keys and encoders "
+                           "(see `vialtic schema change_set`)")
 
     proposal = sub.add_parser("proposal", help="Read stored proposals.").add_subparsers(dest="action", required=True, parser_class=_Parser)
     show = leaf(proposal, "show", "Show a stored proposal.", device=False)
@@ -125,12 +127,22 @@ _KEY_SPEC = re.compile(r"^(\d+):(\d+),(\d+)=(.+)$")
 _ENCODER_SPEC = re.compile(r"^(\d+):(\d+):([01])=(.+)$")
 
 
+MAX_CHANGE_FILE = 4 * 1024 * 1024
+
+
+def _read_bounded(path: str) -> str:
+    with open(path, encoding="utf-8", errors="replace") as source:
+        return source.read(MAX_CHANGE_FILE + 1)
+
+
 def _changes_from_args(args: argparse.Namespace) -> ChangeSet:
     if args.changes and (args.set_keys or args.set_encoders):
         raise UsageError("Use --changes or --set/--set-encoder, not both.")
     if args.changes:
         try:
-            text = sys.stdin.read() if args.changes == "-" else pathlib.Path(args.changes).read_text()
+            text = sys.stdin.read(MAX_CHANGE_FILE + 1) if args.changes == "-" else _read_bounded(args.changes)
+            if len(text) > MAX_CHANGE_FILE:
+                raise VialticError("invalid_file", f"The change set is over the {MAX_CHANGE_FILE} byte limit.")
             return ChangeSet.model_validate_json(text)
         except OSError as exc:
             raise VialticError("invalid_file", f"Could not read {args.changes}: {exc}") from exc
@@ -235,7 +247,7 @@ def _format_inspect(result: InspectResult) -> str:
         f"combos {caps.combo_count}, key overrides {caps.key_override_count}, alt repeat {caps.alt_repeat_key_count}",
         f"  Lighting {caps.lighting}, QMK settings {len(caps.qmk_settings)}"
         + (f" (+{len(caps.unknown_qmk_settings)} unknown)" if caps.unknown_qmk_settings else ""),
-        f"  Writable in this build: {', '.join(caps.writable_operations)}. All families are read and backed up.",
+        f"  Writable on this keyboard: {', '.join(caps.writable_operations)}. All families are read and backed up.",
         f"  Unlocked: {'yes' if result.unlock.unlocked else 'no'}; unlock keys: {unlock_keys}",
         f"  Previous configuration saved: {'yes' if result.previous_available else 'no'}",
     ]
