@@ -159,6 +159,11 @@ class MacroState(Model):
 class SettingsState(Model):
     values: dict[str, int]
     unknown_qsids: list[int] = Field(default_factory=list)
+    # Exposed by the firmware and known to the table, but the firmware refused to report them.
+    unreadable_qsids: list[int] = Field(default_factory=list)
+    # What the firmware answers for unknown_qsids, as hex. Their width is unknown, so these
+    # can show that a value moved but can never be written back.
+    unknown_raw: dict[str, str] = Field(default_factory=dict)
 
 
 class LightingState(Model):
@@ -183,6 +188,14 @@ class Configuration(Model):
     lighting: LightingState
 
 
+class FollowingWrite(Model):
+    """What the write that used this snapshot as its backup changed. Undo needs it for lighting,
+    where a difference may just be someone pressing a lighting key."""
+
+    families: list[str] = Field(default_factory=list)
+    lighting_saved: bool = False
+
+
 class Snapshot(Envelope):
     kind: Literal["snapshot"] = "snapshot"
     created_at: datetime
@@ -193,6 +206,7 @@ class Snapshot(Envelope):
     family_fingerprints: dict[str, str]
     coverage: dict[str, str]
     warnings: list[str] = Field(default_factory=list)
+    followed_by: FollowingWrite | None = None
 
 
 class InspectResult(Envelope):
@@ -237,7 +251,15 @@ class SetEncoderChange(Model):
     keycode: str
 
 
-Change = Annotated[Union[SetKeyChange, SetEncoderChange], Field(discriminator="type")]
+class SetLayoutOptionChange(Model):
+    """Choose one firmware-defined layout alternative. `index` is its position in the option list."""
+
+    type: Literal["set_layout_option"] = "set_layout_option"
+    index: int
+    choice: int
+
+
+Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange], Field(discriminator="type")]
 
 
 class ChangeSet(Envelope):
@@ -265,7 +287,15 @@ class SetEncoderOperation(Model):
     after: KeycodeValue
 
 
-Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation], Field(discriminator="type")]
+class SetLayoutOptionsOperation(Model):
+    type: Literal["set_layout_options"] = "set_layout_options"
+    before: int
+    after: int
+    before_choices: list[int] = Field(default_factory=list)
+    after_choices: list[int] = Field(default_factory=list)
+
+
+Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation, SetLayoutOptionsOperation], Field(discriminator="type")]
 
 
 class Baseline(Model):

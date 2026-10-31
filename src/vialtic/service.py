@@ -212,7 +212,7 @@ class VialticService:
         with self.devices.session(desc) as session:
             self._refuse_if_unresolved(session.identity)
             snapshot = session.snapshot(self.options.now())
-            operations, warnings = proposals.validate_changes(session, snapshot, changes)
+            operations, warnings = proposals.validate_changes(session, snapshot, changes.changes)
             if not operations:
                 raise VialticError("no_changes", "The keyboard already holds every requested value.",
                                    details={"notes": warnings})
@@ -285,7 +285,7 @@ class VialticService:
             warnings.append("Another connected keyboard reports this exact identity. Backups are stored per identity, "
                             "so they cannot be attributed to one of these units with certainty.")
         positions: list[tuple[int, int]] = []
-        if any(op.after.keycode == va.RESET_KEYCODE for op in operations):
+        if proposals.requires_unlock(operations):
             positions = [tuple(p) for p in session.kb.get_unlock_keys()]
         proposal = proposals.build_proposal(proposal_type, session.identity, snapshot, operations, warnings, positions,
                                             self.options.now(), self.options.proposal_ttl, self.options.reconnect_window)
@@ -432,10 +432,11 @@ class VialticService:
             current = session.snapshot(self.options.now())
             self._check_baseline(current, proposal)
             for op in proposal.operations:
-                if op.after.raw != va.Keycode.deserialize(op.after.keycode, reraise=True):
-                    raise VialticError("proposal_stale", "A keycode in this proposal resolves differently now.")
-            if session.kb.get_unlock_status() != 1 and not proposal.unlock.required and any(
-                    op.after.keycode == va.RESET_KEYCODE for op in proposal.operations):
+                for value in proposals.after_keycodes(op):
+                    if value.raw != va.Keycode.deserialize(value.keycode, reraise=True):
+                        raise VialticError("proposal_stale", "A keycode in this proposal resolves differently now.")
+            if session.kb.get_unlock_status() != 1 and not proposal.unlock.required and proposals.requires_unlock(
+                    proposal.operations):
                 raise VialticError("unlock_required", "This proposal needs a physical unlock it did not declare.")
             state = self._save_baseline(session, proposal, current, warnings)
             state.unlocked_here, state.relock_required = unlocked_here, relock_required
@@ -589,12 +590,7 @@ class VialticService:
 
     @staticmethod
     def _write_operation(session: Session, op: Operation) -> None:
-        if op.type == "set_key":
-            session.kb.set_key(op.layer, op.row, op.col, op.after.keycode)
-        elif op.type == "set_encoder":
-            session.kb.set_encoder(op.layer, op.index, op.direction, op.after.keycode)
-        else:
-            raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
+        va.write_operation(session.kb, op)
 
     def _commit(self, state: _ApplyState) -> None:
         """Rotate the backup. Local failures here cannot undo what the keyboard verified."""
@@ -764,8 +760,7 @@ class VialticService:
                         blockers = [b for b in blockers if b not in state.skip_families]
                         if blockers:
                             return False, f"{', '.join(blockers)} changed and cannot be restored by this build.", last_observed
-                        needs_unlock = any(op.after.keycode == va.RESET_KEYCODE for op in operations)
-                        if needs_unlock and session.kb.get_unlock_status() != 1:
+                        if proposals.requires_unlock(operations) and session.kb.get_unlock_status() != 1:
                             return False, "restoring it requires a physical unlock.", last_observed
                         with session.transport.writes():
                             for op in operations:

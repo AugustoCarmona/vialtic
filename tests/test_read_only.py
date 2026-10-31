@@ -78,7 +78,8 @@ def test_capabilities_differ_by_device(make_rig):
     legacy = make_rig("legacy").service.inspect_device()
     assert legacy.device.vial_protocol == 5
     assert legacy.capabilities.tap_dance_count == 0 and legacy.capabilities.lighting == "qmk_backlight"
-    assert legacy.capabilities.writable_operations == ["set_key", "set_encoder"]
+    assert "set_key" in legacy.capabilities.writable_operations
+    assert "set_encoder" not in legacy.capabilities.writable_operations, "that keyboard has no encoders"
 
 
 def test_selection_required_among_several_keyboards(make_rig):

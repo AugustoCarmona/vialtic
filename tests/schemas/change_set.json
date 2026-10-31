@@ -69,6 +69,32 @@
       ],
       "title": "SetKeyChange",
       "type": "object"
+    },
+    "SetLayoutOptionChange": {
+      "additionalProperties": false,
+      "description": "Choose one firmware-defined layout alternative. `index` is its position in the option list.",
+      "properties": {
+        "choice": {
+          "title": "Choice",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_layout_option",
+          "default": "set_layout_option",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "choice"
+      ],
+      "title": "SetLayoutOptionChange",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -78,7 +104,8 @@
         "discriminator": {
           "mapping": {
             "set_encoder": "#/$defs/SetEncoderChange",
-            "set_key": "#/$defs/SetKeyChange"
+            "set_key": "#/$defs/SetKeyChange",
+            "set_layout_option": "#/$defs/SetLayoutOptionChange"
           },
           "propertyName": "type"
         },
@@ -88,6 +115,9 @@
           },
           {
             "$ref": "#/$defs/SetEncoderChange"
+          },
+          {
+            "$ref": "#/$defs/SetLayoutOptionChange"
           }
         ]
       },

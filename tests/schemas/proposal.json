@@ -267,6 +267,45 @@
       "title": "SetKeyOperation",
       "type": "object"
     },
+    "SetLayoutOptionsOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "title": "After",
+          "type": "integer"
+        },
+        "after_choices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "After Choices",
+          "type": "array"
+        },
+        "before": {
+          "title": "Before",
+          "type": "integer"
+        },
+        "before_choices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Before Choices",
+          "type": "array"
+        },
+        "type": {
+          "const": "set_layout_options",
+          "default": "set_layout_options",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "title": "SetLayoutOptionsOperation",
+      "type": "object"
+    },
     "UnlockPosition": {
       "additionalProperties": false,
       "properties": {
@@ -327,7 +366,8 @@
         "discriminator": {
           "mapping": {
             "set_encoder": "#/$defs/SetEncoderOperation",
-            "set_key": "#/$defs/SetKeyOperation"
+            "set_key": "#/$defs/SetKeyOperation",
+            "set_layout_options": "#/$defs/SetLayoutOptionsOperation"
           },
           "propertyName": "type"
         },
@@ -337,6 +377,9 @@
           },
           {
             "$ref": "#/$defs/SetEncoderOperation"
+          },
+          {
+            "$ref": "#/$defs/SetLayoutOptionsOperation"
           }
         ]
       },

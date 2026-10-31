@@ -71,19 +71,15 @@ MAX_DEFINITION_JSON = 4 * 1024 * 1024
 MAX_KEYMAP_BYTES = 0xFFFF
 MAX_KEYCODE_TEXT = 64
 
-# Operations this build can validate, apply, verify and restore. The rest of
-# the configuration surface is read and backed up, and arrives with M3.
-WRITABLE_OPERATIONS = ["set_key", "set_encoder"]
-
-# Families compared against a proposal's baseline before writing. Lighting is
-# left out on purpose: lighting keys on the keyboard change it without any host
-# involved, and no operation in this build writes it.
+# Families compared against a proposal's baseline before writing. Lighting joins
+# them only in a proposal that changes it: lighting keys on the keyboard change it
+# without any host involved, and that must not invalidate an unrelated proposal.
 CHECKED_FAMILIES = [
     "keymap", "encoders", "layout_options", "macros", "tap_dance", "combos",
     "key_overrides", "alt_repeat_keys", "settings",
 ]
 ALL_FAMILIES = CHECKED_FAMILIES + ["lighting"]
-RESTORABLE_FAMILIES = {"keymap", "encoders"}
+RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options"}
 
 
 class HeadlessKeyboard(Keyboard):
@@ -338,6 +334,10 @@ def list_keycodes(query: str | None = None) -> list[KeycodeInfo]:
 
 # Geometry.
 
+def _layout_option_size(item) -> int:
+    return 1 if isinstance(item, str) else (len(item) - 2).bit_length()
+
+
 def layout_choices(labels, value: int) -> list[int]:
     """Decode the packed layout option value. Port of LayoutEditor.unpack/get_choice."""
     if not labels or value < 0:
@@ -346,7 +346,7 @@ def layout_choices(labels, value: int) -> list[int]:
     choices = []
     # VIA stores option choices backwards, parse the value in reverse.
     for item in reversed(labels):
-        size = 1 if isinstance(item, str) else (len(item) - 2).bit_length()
+        size = _layout_option_size(item)
         if size == 0:
             choices.append(0)
             continue
@@ -354,6 +354,18 @@ def layout_choices(labels, value: int) -> list[int]:
         bits = bits[:-size]
     choices.reverse()
     return choices
+
+
+def layout_option_count(item) -> int:
+    """How many alternatives one option offers. A plain label is on or off."""
+    return 2 if isinstance(item, str) else len(item) - 1
+
+
+def set_layout_choice(labels, value: int, index: int, choice: int) -> int:
+    """Replace one option in the packed value, leaving every other bit as it was."""
+    shift = sum(_layout_option_size(item) for item in labels[index + 1:])
+    mask = ((1 << _layout_option_size(labels[index])) - 1) << shift
+    return (value & ~mask) | (choice << shift)
 
 
 def _geometry(key, ident: str, **extra) -> KeyGeometry:
@@ -386,6 +398,12 @@ def lighting_kind(kb: Keyboard) -> str:
     return "none"
 
 
+def writable_operations(kb: Keyboard) -> list[str]:
+    """Operations this keyboard can take; a family it lacks is not offered."""
+    available = {"set_key": True, "set_encoder": bool(kb.encoder_count), "set_layout_option": bool(kb.layout_labels)}
+    return [name for name, present in available.items() if present]
+
+
 def capabilities_of(kb: Keyboard) -> Capabilities:
     return Capabilities(
         layers=kb.layers, rows=kb.rows, cols=kb.cols, key_count=len(kb.keys), encoder_count=kb.encoder_count,
@@ -396,7 +414,7 @@ def capabilities_of(kb: Keyboard) -> Capabilities:
         unknown_qmk_settings=sorted(q for q in kb.supported_settings if not QmkSettings.is_qsid_supported(q)),
         lighting=lighting_kind(kb), layout_option_labels=kb.layout_labels or [],
         supported_features=sorted(kb.supported_features), custom_keycode_count=len(kb.custom_keycodes or []),
-        midi=kb.midi if isinstance(kb.midi, str) else None, writable_operations=list(WRITABLE_OPERATIONS))
+        midi=kb.midi if isinstance(kb.midi, str) else None, writable_operations=writable_operations(kb))
 
 
 def read_configuration(kb: Keyboard) -> Configuration:
@@ -453,6 +471,20 @@ def coverage_of(kb: Keyboard, config: Configuration) -> dict[str, str]:
                      else present(len(kb.supported_settings))),
         "lighting": present(0 if lighting_kind(kb) == "none" else 1),
     }
+
+
+# Writes. Upstream's setters update their in-memory copy before sending and some ignore the
+# outcome, so callers must prove every write by reloading from the keyboard.
+
+def write_operation(kb: Keyboard, op) -> None:
+    if op.type == "set_key":
+        kb.set_key(op.layer, op.row, op.col, op.after.keycode)
+    elif op.type == "set_encoder":
+        kb.set_encoder(op.layer, op.index, op.direction, op.after.keycode)
+    elif op.type == "set_layout_options":
+        kb.set_layout_options(op.after)
+    else:
+        raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 
 
 def is_vial_protocol_supported(via: int, vial: int) -> bool:

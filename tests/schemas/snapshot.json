@@ -358,6 +358,26 @@
       "title": "EncoderEntry",
       "type": "object"
     },
+    "FollowingWrite": {
+      "additionalProperties": false,
+      "description": "What the write that used this snapshot as its backup changed. Undo needs it for lighting,\nwhere a difference may just be someone pressing a lighting key.",
+      "properties": {
+        "families": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Families",
+          "type": "array"
+        },
+        "lighting_saved": {
+          "default": false,
+          "title": "Lighting Saved",
+          "type": "boolean"
+        }
+      },
+      "title": "FollowingWrite",
+      "type": "object"
+    },
     "KeyGeometry": {
       "additionalProperties": false,
       "properties": {
@@ -688,6 +708,20 @@
           "title": "Unknown Qsids",
           "type": "array"
         },
+        "unknown_raw": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Unknown Raw",
+          "type": "object"
+        },
+        "unreadable_qsids": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Unreadable Qsids",
+          "type": "array"
+        },
         "values": {
           "additionalProperties": {
             "type": "integer"
@@ -732,6 +766,17 @@
       },
       "title": "Family Fingerprints",
       "type": "object"
+    },
+    "followed_by": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FollowingWrite"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "kind": {
       "const": "snapshot",

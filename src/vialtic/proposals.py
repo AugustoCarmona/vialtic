@@ -4,85 +4,197 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timedelta
-from typing import Iterable
+from typing import Any, Iterable
 
 from . import vial_adapter as va
 from .device import Session, canonical_json
 from .errors import VialticError
 from .models import (
-    Baseline, ChangeSet, Configuration, DeviceIdentity, EncoderEntry, KeycodeValue, KeymapEntry, Operation, Proposal,
-    ProposalType, ProposalUnlock, SetEncoderChange, SetEncoderOperation, SetKeyChange, SetKeyOperation, Snapshot,
-    UnlockPosition, VerificationDifference,
+    Baseline, Change, Configuration, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
+    ProposalType, ProposalUnlock, SetEncoderChange, SetEncoderOperation, SetKeyChange, SetKeyOperation,
+    SetLayoutOptionChange, SetLayoutOptionsOperation, Snapshot, UnlockPosition, VerificationDifference,
 )
 
 DEFAULT_TTL = timedelta(minutes=30)
 ID_PREFIX = "pr-"
 
-VERIFICATION_TEXT = ("After writing, every configuration family except transient lighting is read back from the "
-                     "keyboard and compared with the expected result.")
+VERIFICATION_TEXT = ("After writing, every configuration family is read back from the keyboard and compared with the "
+                     "expected result. Lighting is included only when this proposal changes it, because lighting keys "
+                     "can change it at any moment.")
 RECOVERY_TEXT = ("Everything Vialtic can read from the keyboard is saved before the first write; any exceptions are "
                  "listed in the warnings. If a write or the read-back fails, Vialtic tries to restore that saved state "
                  "within the reconnect window, without further approval. If it cannot, the backup is kept and the exact "
                  "recovery command is reported.")
+
+FAMILY_OF_OPERATION = {"set_key": "keymap", "set_encoder": "encoders", "set_layout_options": "layout_options"}
 
 
 def _value(entry: KeymapEntry | EncoderEntry) -> KeycodeValue:
     return KeycodeValue(raw=entry.raw, keycode=entry.keycode, label=entry.label)
 
 
-def validate_changes(session: Session, snapshot: Snapshot, changes: ChangeSet) -> tuple[list[Operation], list[str]]:
+def after_keycodes(op: Operation) -> list[KeycodeValue]:
+    """Every keycode an operation writes, including ones an entry merely keeps."""
+    if op.type in ("set_key", "set_encoder"):
+        return [op.after]
+    return []
+
+
+def requires_unlock(operations: Iterable[Operation]) -> bool:
+    """Whether the firmware will only accept these writes while physically unlocked."""
+    return any(value.keycode == va.RESET_KEYCODE for op in operations for value in after_keycodes(op))
+
+
+def _capability(present: object, family: str, description: str) -> None:
+    if not present:
+        raise VialticError("capability_unavailable", f"This keyboard's firmware does not expose {description}.",
+                           details={"family": family}, next_steps=["Run `vialtic device inspect` to see what it exposes."])
+
+
+class _Planner:
+    """Turns one request into typed operations, or refuses all of it."""
+
+    def __init__(self, session: Session, snapshot: Snapshot, quiet: bool):
+        self.kb = session.kb
+        self.config = snapshot.configuration
+        self.keys = {(e.layer, e.row, e.col): e for e in self.config.keymap}
+        self.encoders = {(e.layer, e.index, e.direction): e for e in self.config.encoders}
+        self.operations: list[Operation] = []
+        self.warnings: list[str] = []
+        self.quiet = quiet
+        self.seen: set[tuple] = set()
+        self.layout_value: int | None = None
+
+    def _once(self, target: tuple, description: str) -> None:
+        if target in self.seen:
+            raise VialticError("invalid_request", f"The request changes {description} more than once.")
+        self.seen.add(target)
+
+    def _keycode(self, text: str) -> KeycodeValue:
+        value, notes = va.parse_keycode(self.kb, text)
+        self.warnings.extend(n for n in notes if n not in self.warnings)
+        return value
+
+    def _skip(self, description: str) -> None:
+        if not self.quiet:
+            self.warnings.append(f"Skipped {description}: it already has that value.")
+
+    def _index(self, index: int, count: int, name: str) -> None:
+        if not 0 <= index < count:
+            raise VialticError("invalid_coordinate", f"{name} {index} does not exist; this keyboard has {count}.")
+
+    def add(self, change: Change) -> None:
+        getattr(self, "_" + change.type)(change)
+
+    def _layer(self, layer: int) -> None:
+        if not 0 <= layer < self.kb.layers:
+            raise VialticError("invalid_coordinate", f"Layer {layer} does not exist; this keyboard has layers "
+                                                     f"0-{self.kb.layers - 1}.")
+
+    def _set_key(self, change: SetKeyChange) -> None:
+        self._layer(change.layer)
+        entry = self.keys.get((change.layer, change.row, change.col))
+        if entry is None:
+            raise VialticError("invalid_coordinate", f"Layer {change.layer} has no key at row {change.row}, column "
+                                                     f"{change.col}.",
+                               next_steps=["Run `vialtic view` to see valid positions."])
+        self._once(("key", change.layer, change.row, change.col), f"key {change.layer}:{change.row},{change.col}")
+        after = self._keycode(change.keycode)
+        if entry.raw == after.raw:
+            return self._skip(f"layer {change.layer} key {change.row},{change.col}")
+        self.operations.append(SetKeyOperation(layer=change.layer, row=change.row, col=change.col, before=_value(entry),
+                                               after=after))
+
+    def _set_encoder(self, change: SetEncoderChange) -> None:
+        self._layer(change.layer)
+        entry = self.encoders.get((change.layer, change.index, change.direction))
+        if entry is None:
+            _capability(self.kb.encoder_count, "encoders", "encoders")
+            raise VialticError("invalid_coordinate", f"Layer {change.layer} has no encoder {change.index} direction "
+                                                     f"{change.direction}.")
+        self._once(("encoder", change.layer, change.index, change.direction),
+                   f"encoder {change.layer}:{change.index}:{change.direction}")
+        after = self._keycode(change.keycode)
+        if entry.raw == after.raw:
+            return self._skip(f"layer {change.layer} encoder {change.index} direction {change.direction}")
+        self.operations.append(SetEncoderOperation(layer=change.layer, index=change.index, direction=change.direction,
+                                                   before=_value(entry), after=after))
+
+    def _set_layout_option(self, change: SetLayoutOptionChange) -> None:
+        labels = self.kb.layout_labels
+        _capability(labels, "layout_options", "layout options")
+        self._index(change.index, len(labels), "Layout option")
+        self._once(("layout_option", change.index), f"layout option {change.index}")
+        count = va.layout_option_count(labels[change.index])
+        if not 0 <= change.choice < count:
+            raise VialticError("invalid_request", f"Layout option {change.index} has choices 0-{count - 1}, not "
+                                                  f"{change.choice}.")
+        current = self.config.layout_options if self.layout_value is None else self.layout_value
+        self.layout_value = va.set_layout_choice(labels, current, change.index, change.choice)
+
+    def finish(self) -> tuple[list[Operation], list[str]]:
+        before = self.config.layout_options
+        if self.layout_value is not None:
+            if self.layout_value == before:
+                self._skip("layout options")
+            else:
+                labels = self.kb.layout_labels
+                self.operations.append(SetLayoutOptionsOperation(
+                    before=before, after=self.layout_value, before_choices=va.layout_choices(labels, before),
+                    after_choices=va.layout_choices(labels, self.layout_value)))
+        return self.operations, self.warnings
+
+
+def validate_changes(session: Session, snapshot: Snapshot, changes: Iterable[Change],
+                     quiet: bool = False) -> tuple[list[Operation], list[str]]:
     """Turn requested changes into typed operations, or refuse the whole request."""
-    kb = session.kb
-    keys = {(e.layer, e.row, e.col): e for e in snapshot.configuration.keymap}
-    encoders = {(e.layer, e.index, e.direction): e for e in snapshot.configuration.encoders}
-    operations: list[Operation] = []
-    warnings: list[str] = []
-    seen: set[tuple] = set()
-
-    for change in changes.changes:
-        if not 0 <= change.layer < kb.layers:
-            raise VialticError("invalid_coordinate", f"Layer {change.layer} does not exist; this keyboard has layers "
-                                                     f"0-{kb.layers - 1}.")
-        if isinstance(change, SetKeyChange):
-            target = ("key", change.layer, change.row, change.col)
-            entry = keys.get((change.layer, change.row, change.col))
-            if entry is None:
-                raise VialticError("invalid_coordinate", f"Layer {change.layer} has no key at row {change.row}, column "
-                                                         f"{change.col}.",
-                                   next_steps=["Run `vialtic view` to see valid positions."])
-        else:
-            assert isinstance(change, SetEncoderChange)
-            target = ("encoder", change.layer, change.index, change.direction)
-            entry = encoders.get((change.layer, change.index, change.direction))
-            if entry is None:
-                raise VialticError("invalid_coordinate", f"Layer {change.layer} has no encoder {change.index} direction "
-                                                         f"{change.direction}.")
-        if target in seen:
-            raise VialticError("invalid_request", f"The request changes {target[0]} {target[1:]} more than once.")
-        seen.add(target)
-
-        after, notes = va.parse_keycode(kb, change.keycode)
-        warnings.extend(n for n in notes if n not in warnings)
-        before = _value(entry)
-        if before.raw == after.raw:
-            warnings.append(f"Skipped {_describe_target(change)}: it is already {after.keycode}.")
-            continue
-        if isinstance(change, SetKeyChange):
-            operations.append(SetKeyOperation(layer=change.layer, row=change.row, col=change.col, before=before, after=after))
-        else:
-            operations.append(SetEncoderOperation(layer=change.layer, index=change.index, direction=change.direction,
-                                                  before=before, after=after))
-    return operations, warnings
-
-
-def _describe_target(item) -> str:
-    if item.type == "set_key":
-        return f"layer {item.layer} key {item.row},{item.col}"
-    return f"layer {item.layer} encoder {item.index} direction {item.direction}"
+    planner = _Planner(session, snapshot, quiet)
+    for change in changes:
+        planner.add(change)
+    return planner.finish()
 
 
 def describe_operation(op: Operation) -> str:
-    return f"{_describe_target(op)}: {op.before.keycode} -> {op.after.keycode}"
+    """One line for people. Macro contents never appear here."""
+    if op.type == "set_key":
+        return f"layer {op.layer} key {op.row},{op.col}: {op.before.keycode} -> {op.after.keycode}"
+    if op.type == "set_encoder":
+        return f"layer {op.layer} encoder {op.index} direction {op.direction}: {op.before.keycode} -> {op.after.keycode}"
+    if op.type == "set_layout_options":
+        return f"layout options: {op.before} {op.before_choices} -> {op.after} {op.after_choices}"
+    raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
+
+
+# Comparable state. Values are what each family reads back as: raw codes for keys and encoders,
+# canonical names for entries. Both come from upstream's lossless codec.
+
+def family_state(config: Configuration) -> dict[str, dict[str, Any]]:
+    return {
+        "keymap": {f"{e.layer}:{e.row},{e.col}": e.raw for e in config.keymap},
+        "encoders": {f"{e.layer}:{e.index}:{e.direction}": e.raw for e in config.encoders},
+        "layout_options": {"value": config.layout_options},
+    }
+
+
+def operation_effect(op: Operation) -> tuple[str, str, Any, Any]:
+    """The family, target, prior value and new value of one operation."""
+    if op.type == "set_key":
+        return "keymap", f"{op.layer}:{op.row},{op.col}", op.before.raw, op.after.raw
+    if op.type == "set_encoder":
+        return "encoders", f"{op.layer}:{op.index}:{op.direction}", op.before.raw, op.after.raw
+    if op.type == "set_layout_options":
+        return "layout_options", "value", op.before, op.after
+    raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
+
+
+def affected_families(operations: Iterable[Operation]) -> list[str]:
+    return sorted({FAMILY_OF_OPERATION[op.type] for op in operations})
+
+
+def restore_blockers(current: Configuration, target: Configuration) -> list[str]:
+    """Families whose shape changed, which happens when firmware was rebuilt with the same definition."""
+    have, want = family_state(current), family_state(target)
+    return [family for family in want if set(want[family]) - set(have[family])]
 
 
 def restore_operations(current: Configuration, target: Configuration) -> tuple[list[Operation], list[str], list[str]]:
@@ -100,19 +212,17 @@ def restore_operations(current: Configuration, target: Configuration) -> tuple[l
         if have is not None and have.raw != wanted.raw:
             ops.append(SetEncoderOperation(layer=wanted.layer, index=wanted.index, direction=wanted.direction,
                                            before=_value(have), after=_value(wanted)))
+    blockers = restore_blockers(current, target)
+    if "layout_options" not in blockers and current.layout_options != target.layout_options:
+        ops.append(SetLayoutOptionsOperation(before=current.layout_options, after=target.layout_options))
 
     now_data, target_data = current.model_dump(mode="json"), target.model_dump(mode="json")
-    blockers = [f for f in va.CHECKED_FAMILIES
-                if f not in va.RESTORABLE_FAMILIES and now_data[f] != target_data[f]]
+    blockers += [f for f in va.CHECKED_FAMILIES
+                 if f not in va.RESTORABLE_FAMILIES and f not in blockers and now_data[f] != target_data[f]]
     notes = []
     if now_data["lighting"] != target_data["lighting"]:
         notes.append("Lighting differs from the saved state and will not be restored: this build cannot write lighting yet.")
     return ops, blockers, notes
-
-
-def affected_families(operations: Iterable[Operation]) -> list[str]:
-    families = {"keymap" if op.type == "set_key" else "encoders" for op in operations}
-    return sorted(families)
 
 
 def proposal_id(fields: dict) -> str:
@@ -124,7 +234,7 @@ def proposal_id(fields: dict) -> str:
 def build_proposal(proposal_type: ProposalType, device: DeviceIdentity, snapshot: Snapshot,
                    operations: list[Operation], warnings: list[str], positions: list[tuple[int, int]],
                    now: datetime, ttl: timedelta, reconnect_window: float) -> Proposal:
-    required = any(op.after.keycode == va.RESET_KEYCODE for op in operations)
+    required = requires_unlock(operations)
     fields = dict(
         schema_version=1, kind="proposal", proposal_type=proposal_type, device=device,
         baseline=Baseline(family_fingerprints={f: snapshot.family_fingerprints[f] for f in va.CHECKED_FAMILIES},
@@ -150,58 +260,49 @@ def check_integrity(proposal: Proposal) -> None:
                            next_steps=["Create a new proposal and get it approved."])
 
 
-def expected_after(baseline: Configuration, operations: Iterable[Operation]) -> dict[str, dict]:
-    """The keymap and encoder values the keyboard must hold once operations are applied."""
-    keys = {f"{e.layer}:{e.row},{e.col}": e.raw for e in baseline.keymap}
-    encoders = {f"{e.layer}:{e.index}:{e.direction}": e.raw for e in baseline.encoders}
+def expected_after(baseline: Configuration, operations: Iterable[Operation]) -> dict[str, dict[str, Any]]:
+    """The values each family must hold once operations are applied."""
+    state = family_state(baseline)
     for op in operations:
-        if op.type == "set_key":
-            keys[f"{op.layer}:{op.row},{op.col}"] = op.after.raw
-        else:
-            encoders[f"{op.layer}:{op.index}:{op.direction}"] = op.after.raw
-    return {"keymap": keys, "encoders": encoders}
+        family, target, _, after = operation_effect(op)
+        state.setdefault(family, {})[target] = after
+    return state
 
 
 def unexplained_values(baseline: Configuration, operations: Iterable[Operation],
                        observed: Configuration) -> list[VerificationDifference]:
-    """Keymap and encoder values neither the baseline nor this write can account for.
+    """Values neither the baseline nor this write can account for.
 
     A keyboard holding any is not provably the unit that was being written, or another
     application changed it during the write. Either way it must not be overwritten.
     """
-    allowed: dict[str, set[int]] = {}
-    for e in baseline.keymap:
-        allowed[f"key {e.layer}:{e.row},{e.col}"] = {e.raw}
-    for e in baseline.encoders:
-        allowed[f"encoder {e.layer}:{e.index}:{e.direction}"] = {e.raw}
+    allowed = {family: {target: [value] for target, value in values.items()}
+               for family, values in family_state(baseline).items()}
     for op in operations:
-        target = (f"key {op.layer}:{op.row},{op.col}" if op.type == "set_key"
-                  else f"encoder {op.layer}:{op.index}:{op.direction}")
-        allowed.setdefault(target, set()).update({op.before.raw, op.after.raw})
-    found = [(f"key {e.layer}:{e.row},{e.col}", "keymap", e.raw) for e in observed.keymap] + \
-            [(f"encoder {e.layer}:{e.index}:{e.direction}", "encoders", e.raw) for e in observed.encoders]
-    return [VerificationDifference(family=family, target=target, observed=raw)
-            for target, family, raw in found if raw not in allowed.get(target, set())]
+        family, target, before, after = operation_effect(op)
+        allowed.setdefault(family, {}).setdefault(target, []).extend([before, after])
+    return [VerificationDifference(family=family, target=target, observed=value)
+            for family, values in family_state(observed).items() for target, value in values.items()
+            if value not in allowed.get(family, {}).get(target, [])]
 
 
 def compare_state(baseline: Configuration, operations: Iterable[Operation], observed: Configuration,
                   skip_families: Iterable[str] = ()) -> list[VerificationDifference]:
     """Differences between the observed configuration and baseline plus operations."""
     expected = expected_after(baseline, operations)
+    seen = family_state(observed)
     diffs: list[VerificationDifference] = []
-    seen_keys = {f"{e.layer}:{e.row},{e.col}": e.raw for e in observed.keymap}
-    for target, raw in expected["keymap"].items():
-        if seen_keys.get(target) != raw:
-            diffs.append(VerificationDifference(family="keymap", target=target, expected=raw, observed=seen_keys.get(target)))
-    seen_encoders = {f"{e.layer}:{e.index}:{e.direction}": e.raw for e in observed.encoders}
-    for target, raw in expected["encoders"].items():
-        if seen_encoders.get(target) != raw:
-            diffs.append(VerificationDifference(family="encoders", target=target, expected=raw,
-                                                observed=seen_encoders.get(target)))
-    base, seen = baseline.model_dump(mode="json"), observed.model_dump(mode="json")
+    for family, values in expected.items():
+        if family in skip_families:
+            continue
+        for target, value in values.items():
+            if seen.get(family, {}).get(target) != value:
+                diffs.append(VerificationDifference(family=family, target=target, expected=value,
+                                                    observed=seen.get(family, {}).get(target)))
+    base, now = baseline.model_dump(mode="json"), observed.model_dump(mode="json")
     for family in va.CHECKED_FAMILIES:
         # Values stay out of these entries: macro contents must not reach output by default.
-        if family not in va.RESTORABLE_FAMILIES and family not in skip_families and base[family] != seen[family]:
+        if family not in va.RESTORABLE_FAMILIES and family not in skip_families and base[family] != now[family]:
             diffs.append(VerificationDifference(family=family, target=family))
     return diffs
 
