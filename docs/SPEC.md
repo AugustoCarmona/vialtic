@@ -173,7 +173,9 @@ Real-device acceptance uses owner's Corne for discovery, read-only snapshot, vis
 
 ## 13. Repository and handoff
 
-README starts with name/tagline, Important agent entry message and the owner's English origin note. Preserve sentence capitalization, punctuation and `acp.` signature. AGENTS.md is vendor-neutral, routes installation vs development, identifies authoritative docs and requires updated status. Document contracts/platform interfaces sufficiently for a Windows agent to add a backend and packaging without redesigning the product. `.easter_egg/archivo.md` archives the conversation in its original Spanish; it is the explicit exception to English-only documentation and is not linked from README. It is hidden locally, tracked, and visible on GitHub after a user-authorized push.
+README starts with name/tagline, Important agent entry message and the owner's English origin note. Keep the origin note entirely lowercase, without quotation marks, preserving its wording, punctuation and `acp.` signature. AGENTS.md is vendor-neutral, routes installation vs development, identifies authoritative docs and requires updated status. Document contracts/platform interfaces sufficiently for a Windows agent to add a backend and packaging without redesigning the product. `.easter_egg/archivo.md` archives the conversation in its original Spanish; it is the explicit exception to English-only documentation and is not linked from README. It is hidden locally, tracked, and visible on GitHub after a user-authorized push.
+
+Every code change must include a review and update of README.md from “Project status” onward and all affected documentation, including STATUS.md, to match the resulting implementation, behavior, limitations and verification evidence. Documentation synchronization is required to complete the change; it must not be deferred. Distinguish planned, implemented and hardware-verified behavior. Preserve the README introduction and origin note unless the owner requests changes.
 
 ## 14. Release completion
 

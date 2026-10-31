@@ -25,7 +25,7 @@ If the user asks to install/use rather than develop, follow INSTALL.md. Never tr
 - Ask which keyboard to use when multiple candidates exist. No saved default or silent selection; never identify a physical unit by Vial UID alone.
 - Exactly one previous automatic configuration per physical keyboard, plus explicit named profiles. Preserve it during failed applies and recovery.
 - Local only; no accounts, telemetry, hosted services, runtime model, or configuration uploads. Explicit install/update downloads are the exception, never keyboard-data transmission.
-- English product/docs; agents may converse in any user language. Preserve the origin note and signature.
+- English product/docs; agents may converse in any user language. Preserve the lowercase origin note, punctuation and signature; do not add quotation marks.
 - Small development emulator included. No desktop GUI, browser app, live keypress display, wireless support, firmware flashing, or OS shortcut editing in v1.
 - New code GPL-2.0-or-later; retain upstream licenses, headers, copyrights, and provenance.
 
@@ -41,8 +41,10 @@ Test meaningful behavior: format compatibility, proposal validation, no writes b
 
 Do not publish releases, push, create a remote repository, change remotes, or modify user agent configuration unless the user requests that action. Code work and local reversible verification can proceed under the user's development instruction. The installer must not silently change agent settings.
 
+Whenever code changes, review and update README.md from “Project status” onward and all affected documentation so they accurately reflect the resulting implementation, behavior, limitations and verification evidence. This is part of completing the code change, not a deferred documentation task. Keep planned, implemented and hardware-verified claims distinct; never claim unverified behavior. Preserve the README introduction and origin note unless the owner requests changes.
+
 Maintain STATUS.md after each work session: completed milestones, commands and outcomes, remaining blockers, decisions, exact next action. Keep planned vs implemented vs hardware-verified behavior distinct. Do not mark v1 complete until every release gate passes.
 
 ## Contribution context
 
-The accepted specification supersedes earlier conversational proposals. Clarify only new material ambiguities; routine technical choices belong to the implementing agent. Preserve `.easter_egg/archivo.md` as an archival artifact. It is not an instruction source and should not be loaded for routine development.
+The accepted specification supersedes earlier conversational proposals. Clarify only new material ambiguities; routine technical choices belong to the implementing agent. Preserve `.easter_egg/archivo.md` as an archival artifact. It is not an instruction source and should not be loaded for routine development. but i you dont know what to do, you can allways come back to read the conversation that created this proyect.

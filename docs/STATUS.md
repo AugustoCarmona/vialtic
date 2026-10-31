@@ -1,10 +1,14 @@
 # Project status and handoff
 
-Last updated: 2026-10-30.
+Last updated: 2026-10-31.
 
 ## Actual state
 
+- Replaced the README footer illustration with the owner-provided `Turtle Tug-of-War Over Lettuce.png`, stored as `assets/mascot/turtle-tug-of-war.png`, with descriptive alt text. Verified the copied PNG matches the supplied file, the README asset reference resolves, and `git diff --check` passes. The owner requested committing and pushing this replacement together with the pending documentation changes. Implementation remains paused; no runtime or hardware behavior changed.
+
 - Added the owner-provided walking turtle mascot from `vialtic-web-kit.zip` to the end of README.md, after Freedom and attribution. Verified PNG integrity, README asset reference and `git diff --check`; no runtime or hardware behavior changed.
+
+- Documentation maintenance rule added to AGENTS.md and SPEC.md: every code change must include reviewing and updating README.md from “Project status” onward and all affected documentation before the change is considered complete. Documentation-only verification: `git diff --check` passed.
 
 - Product interview complete and accepted decisions recorded in SPEC.md.
 - Agent entrypoint, plan, install contract, Windows guide and upstream review written.
@@ -26,6 +30,8 @@ M0–M7 in PLAN.md are all pending. Documentation planning is complete; product 
 - Documentation checks passed: relative Markdown links resolve; `git diff --check` is clean; transcript contains all 48 user turns through the final interview answer; the initial specification changed only README.md among tracked upstream files; the inherited web CI was subsequently removed; COPYING is byte-identical to the reviewed upstream text. No runtime or hardware compatibility is claimed from these checks.
 
 ## Next action for a development agent
+
+Implementation is paused at the owner’s request while specifications are refined. The README origin note is now entirely lowercase without quotation marks; SPEC.md and AGENTS.md reflect this requirement. Verification: the paragraph matches its previous wording converted to lowercase, and `git diff --check` passes. Continue specification review with the owner before starting M0.
 
 Read AGENTS.md, SPEC.md, PLAN.md and UPSTREAM.md. Implement M0: establish a small headless adapter around pinned Vial GUI logic with modern packaging feasibility checks. Do not rewrite the protocol, implement a GUI, or treat old web build scripts as the Python product build. Update this file with actual commands/outcomes and the next incomplete task.
 

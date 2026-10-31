@@ -8,7 +8,7 @@ Vial-based agentic software for configuring your keyboard.
 >
 > The agent should read [`AGENTS.md`](AGENTS.md), follow its reading order, and use the specification and project status to collaborate with you. Agents with repository-reading and local execution capabilities can work directly; other clients may require you to provide files or enable local tools.
 
-This idea was born on Friday, October 30, after an extreme day of work. To clear my head a little, I had two pieces of toast as an afternoon snack and started configuring my new Omarchy. It turns out my Corne keyboard has trouble accessing the numbered workspaces, so I started configuring it through Vial. But with Codex open on my main screen, I realized it would be much easier to simply ask my agent. That is how this project was born. If you are using it, I hope you enjoy it. And if you are going to contribute, I hope you enjoy it too. A big hug. acp.
+this idea was born on friday, october 30, after an extreme day of work. to clear my head a little, i had two pieces of toast as an afternoon snack and started configuring my new omarchy. it turns out my corne keyboard has trouble accessing the numbered workspaces, so i started configuring it through vial. but with codex open on my main screen, i realized it would be much easier to simply ask my agent. that is how this project was born. if you are using it, i hope you enjoy it. and if you are going to contribute, i hope you enjoy it too. a big hug. acp.
 
 ## Project status
 
@@ -41,5 +41,5 @@ For installation after releases exist, the same repository will direct agents to
 New Vialtic code will use GPL-2.0-or-later. Preserve upstream notices and licenses for all reused material. Vialtic is based on [Vial](https://github.com/vial-kb/vial-gui); this checkout originated from [Vial Web](https://github.com/vial-kb/vial-web). See [COPYING](COPYING) and [upstream provenance](docs/UPSTREAM.md).
 
 <p align="center">
-  <img src="assets/mascot/turtle-walking.png" alt="The Vialtic turtle walking to the right" width="320">
+  <img src="assets/mascot/turtle-tug-of-war.png" alt="Two turtles pulling on a lettuce leaf" width="640">
 </p>
