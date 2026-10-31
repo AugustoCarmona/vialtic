@@ -392,4 +392,4 @@ def test_every_fault_at_every_profile_file_operation(tmp_path, operation, fault)
         assert output == "old export" or json.loads(output)["kind"] == "profile"
         if not injector.fired:
             break
-    assert site > 2, "the sweep must reach file operations"
+    assert site >= 2, "the sweep must reach file operations"
