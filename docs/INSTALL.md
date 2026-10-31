@@ -17,7 +17,7 @@ python3 -m venv .venv
 .venv/bin/vialtic doctor
 ```
 
-To build a self-contained directory that needs no Python: `.venv/bin/pyinstaller --noconfirm --clean --distpath dist --workpath build/vialtic packaging/vialtic.spec`, then run `dist/vialtic/vialtic`. A build made on a recent distribution will not necessarily run on older ones; the CI workflow targets the glibc of Ubuntu 22.04 and has no recorded run yet.
+To build a self-contained directory that needs no Python: `.venv/bin/pyinstaller --noconfirm --clean --distpath dist --workpath build/vialtic packaging/vialtic.spec`, then run `dist/vialtic/vialtic`. A build made on a recent distribution will not necessarily run on older ones; the CI build on Ubuntu 22.04 needs glibc 2.35 or newer.
 
 On Linux, non-root access needs a udev rule scoped to Vial keyboards. This rule works on the owner's Arch-based machine. Installing it is a separate elevated step that this project never performs for you, and the keyboard must be replugged afterward:
 

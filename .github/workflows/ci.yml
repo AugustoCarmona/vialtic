@@ -15,7 +15,7 @@ jobs:
         include:
           - os: ubuntu-22.04
             artifact: vialtic-linux-x86_64
-          - os: macos-14
+          - os: macos-15
             artifact: vialtic-macos-arm64
     runs-on: ${{ matrix.os }}
     steps:

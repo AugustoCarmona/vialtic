@@ -4,7 +4,7 @@ Last updated: 2026-10-31.
 
 ## Actual state
 
-M1 and M2 gates are met. M0 is done on Linux x86_64, with its macOS and CI items open. One approved keymap change, read-back and undo is hardware-verified on the owner's Corne. This work was pushed to `main` at the owner's request; no release, tag, agent configuration or system setting was created or changed.
+M1 and M2 gates are met. M0 is done on Linux x86_64, with its macOS item open. One approved keymap change, read-back and undo is hardware-verified on the owner's Corne. This work was pushed to `main` at the owner's request; no release, tag, agent configuration or system setting was created or changed.
 
 Layout added: `src/vialtic/` (CLI, service, proposals, storage, device, adapter, render, emulator), `vendor/vial/` (pinned Vial GUI subset), `tests/`, `packaging/`, `requirements.lock`, `.github/workflows/ci.yml`, `docs/CLI.md`. The Vial Web sources at the root are untouched.
 
@@ -16,7 +16,8 @@ Earlier documentation history: product interview complete, decisions in SPEC.md,
 
 - Done: pinned subset vendored with a hash manifest; five headless seams (about 160 lines) replace everything that imported Qt; upstream's `protocol/`, `keycodes/` and codecs run unmodified. No protocol rewrite and no offscreen Qt adapter. Measurements and decisions are in UPSTREAM.md.
 - Done: `pyproject.toml`, hash-locked `requirements.lock`, PyInstaller directory build on Linux x86_64 that runs with an empty environment.
-- **Open:** the CI workflow (Ubuntu 22.04 x86_64, macOS 14 arm64) has no recorded run yet; the push of this work is its first. Until a result is recorded here there is no macOS build, no macOS evidence, and no recorded glibc baseline. The local binary was built on a current Arch-based system and is not claimed to run elsewhere.
+- Done: first CI run, on commit `e5012de` (run 41236435681). The Ubuntu 22.04 job passed every step on Python 3.12: tests, package build, package smoke test and artifact upload. The artifact it built also runs on the owner's Arch-based machine with an empty environment, on the emulator and in read-only discovery of the Corne. Its bundled binaries need glibc 2.35 or newer, which is the Linux baseline so far.
+- **Open:** the macOS job never started. GitHub cancelled it during a scheduled brownout of the `macos-14` image, which is retired on 2026-11-02, so the run as a whole reads `cancelled`. The workflow now targets `macos-15`, and the push of that change is its first run. Until a result is recorded here there is no macOS build or evidence.
 
 ### M1: contracts, discovery, read-only views. Gate met.
 
@@ -41,6 +42,7 @@ Hardware write, run by the owner on 2026-10-31 from source on the same Corne: `p
 | --- | --- | --- |
 | Test suite, Python 3.14.8 | `.venv/bin/python -m pytest` | 228 passed |
 | Test suite, Python 3.12.16, non-editable install | same | 228 passed |
+| CI on Ubuntu 22.04, Python 3.12 | `.github/workflows/ci.yml`, run 41236435681 | tests, build, package smoke test and artifact pass; macOS job cancelled by GitHub, not run |
 | Upstream's own tests, unchanged, headless | part of the suite (`vendor/vial/upstream/test`) | pass; `test_gui.py` needs Qt and is not vendored |
 | Vendored files match the manifest and the pinned clone | `tests/test_vendor.py` | pass |
 | All 65,536 keycodes round-trip on protocols 5 and 6 | one-off script; the suite keeps a sampled version | 0 losses |
@@ -49,7 +51,7 @@ Hardware write, run by the owner on 2026-10-31 from source on the same Corne: `p
 
 An independent review of the write path, run against the emulator only, found 12 real bugs that the first test suite missed. All are fixed with regression tests at the end of `tests/test_write_core.py`. The most serious: automatic restore could overwrite an identical second keyboard and then delete the backup; a proposal could be written to an identical unit; a proposal file copied over another id could execute under that id's approval; a crash could lock a keyboard out of every further plan; an interrupt after verification could roll back a good write; and the packaged binary collected the old `src/simpleeval.py` from the web tree, which a guard in `packaging/vialtic.spec` now refuses.
 
-Emulator-tested only, not verified on hardware: failure recovery and automatic restore, stale refusal, physical unlock and relock, encoders, layout options, and identical-unit handling. Hardware writes from the packaged binary have not been run either (it was only read-only on the Corne). The Corne reports no encoders, lighting, combos or QMK settings, so those need other hardware. Not verified anywhere: anything on macOS, packaged builds on other Linux distributions, the CI workflow.
+Emulator-tested only, not verified on hardware: failure recovery and automatic restore, stale refusal, physical unlock and relock, encoders, layout options, and identical-unit handling. Hardware writes from the packaged binary have not been run either (it was only read-only on the Corne). The Corne reports no encoders, lighting, combos or QMK settings, so those need other hardware. Not verified anywhere: anything on macOS, and packaged builds on Linux systems other than Ubuntu 22.04 and the owner's machine.
 
 ## Decisions
 
@@ -63,11 +65,12 @@ Emulator-tested only, not verified on hardware: failure recovery and automatic r
 
 ## Next action
 
-Implement M3 from PLAN.md: the capability matrix and writing for the remaining families through the same pipeline, starting by extending `RESTORABLE_FAMILIES` and `WRITABLE_OPERATIONS` in `src/vialtic/vial_adapter.py`. First, record the result of the first CI run here, since it is what can close the M0 macOS item. Further pushes, tags and releases need the owner's request.
+Implement M3 from PLAN.md: the capability matrix and writing for the remaining families through the same pipeline, starting by extending `RESTORABLE_FAMILIES` and `WRITABLE_OPERATIONS` in `src/vialtic/vial_adapter.py`. First, record the `macos-15` job's result here; it is what can close the M0 item. Pushes, tags and releases need the owner's request, including the proposed `v0.1.0` git tag with no GitHub Release.
 
 ## Unresolved engineering work
 
-- Run CI, fix the Linux glibc and macOS baselines from its evidence, and verify native HID on macOS.
+- Get the macOS job running, fix the macOS baseline from its evidence, and verify native HID on macOS.
+- CI warns that `actions/checkout@v4`, `setup-python@v5` and `upload-artifact@v4` target the deprecated Node.js 20. They still work, forced onto Node.js 24; update them when convenient.
 - Implement M3 to M7, including `profile`, `import`, `export`, `mcp serve` and `update`.
 - Obtain macOS Apple Silicon hardware evidence when needed. Missing hardware is a verification limitation, not permission to claim passing results.
 - Decide signing and notarization on evidence.

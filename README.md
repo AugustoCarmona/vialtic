@@ -22,7 +22,7 @@ this idea was born on friday, october 30, after an extreme day of work. to clear
 | Named profiles, `.vil` interchange | Planned (M4). |
 | MCP server for agents | Planned (M5). Agents with terminal access can use the CLI. |
 | Installer, updates, Homebrew | Planned (M6). |
-| macOS Apple Silicon | Planned target. The CI workflow has no recorded run yet, and nothing is verified on macOS. |
+| macOS Apple Silicon | Planned target. Nothing is verified on macOS; its CI job has not run yet. |
 
 Vialtic will let your existing agent inspect and configure USB-connected Vial keyboards: it shows proposed changes, waits for your approval, saves the previous configuration, applies changes and verifies the result. It runs locally without accounts, telemetry, a hosted model, API keys, or configuration uploads. Your chosen agent has its own data-processing behavior.
 
