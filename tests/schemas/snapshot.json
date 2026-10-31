@@ -1,0 +1,770 @@
+{
+  "$defs": {
+    "Capabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "alt_repeat_key_count": {
+          "title": "Alt Repeat Key Count",
+          "type": "integer"
+        },
+        "cols": {
+          "title": "Cols",
+          "type": "integer"
+        },
+        "combo_count": {
+          "title": "Combo Count",
+          "type": "integer"
+        },
+        "custom_keycode_count": {
+          "default": 0,
+          "title": "Custom Keycode Count",
+          "type": "integer"
+        },
+        "encoder_count": {
+          "title": "Encoder Count",
+          "type": "integer"
+        },
+        "key_count": {
+          "title": "Key Count",
+          "type": "integer"
+        },
+        "key_override_count": {
+          "title": "Key Override Count",
+          "type": "integer"
+        },
+        "layers": {
+          "title": "Layers",
+          "type": "integer"
+        },
+        "layout_option_labels": {
+          "items": {},
+          "title": "Layout Option Labels",
+          "type": "array"
+        },
+        "lighting": {
+          "title": "Lighting",
+          "type": "string"
+        },
+        "macro_count": {
+          "title": "Macro Count",
+          "type": "integer"
+        },
+        "macro_memory_bytes": {
+          "title": "Macro Memory Bytes",
+          "type": "integer"
+        },
+        "midi": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Midi"
+        },
+        "qmk_settings": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Qmk Settings",
+          "type": "array"
+        },
+        "rows": {
+          "title": "Rows",
+          "type": "integer"
+        },
+        "supported_features": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Features",
+          "type": "array"
+        },
+        "tap_dance_count": {
+          "title": "Tap Dance Count",
+          "type": "integer"
+        },
+        "unknown_qmk_settings": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Unknown Qmk Settings",
+          "type": "array"
+        },
+        "writable_operations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Writable Operations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "layers",
+        "rows",
+        "cols",
+        "key_count",
+        "encoder_count",
+        "macro_count",
+        "macro_memory_bytes",
+        "tap_dance_count",
+        "combo_count",
+        "key_override_count",
+        "alt_repeat_key_count",
+        "qmk_settings",
+        "unknown_qmk_settings",
+        "lighting"
+      ],
+      "title": "Capabilities",
+      "type": "object"
+    },
+    "Configuration": {
+      "additionalProperties": false,
+      "properties": {
+        "alt_repeat_keys": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Alt Repeat Keys",
+          "type": "array"
+        },
+        "combos": {
+          "items": {
+            "items": {},
+            "type": "array"
+          },
+          "title": "Combos",
+          "type": "array"
+        },
+        "encoders": {
+          "items": {
+            "$ref": "#/$defs/EncoderEntry"
+          },
+          "title": "Encoders",
+          "type": "array"
+        },
+        "key_overrides": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Key Overrides",
+          "type": "array"
+        },
+        "keymap": {
+          "items": {
+            "$ref": "#/$defs/KeymapEntry"
+          },
+          "title": "Keymap",
+          "type": "array"
+        },
+        "layout_options": {
+          "title": "Layout Options",
+          "type": "integer"
+        },
+        "lighting": {
+          "$ref": "#/$defs/LightingState"
+        },
+        "macros": {
+          "$ref": "#/$defs/MacroState"
+        },
+        "settings": {
+          "$ref": "#/$defs/SettingsState"
+        },
+        "tap_dance": {
+          "items": {
+            "items": {},
+            "type": "array"
+          },
+          "title": "Tap Dance",
+          "type": "array"
+        }
+      },
+      "required": [
+        "keymap",
+        "encoders",
+        "layout_options",
+        "macros",
+        "tap_dance",
+        "combos",
+        "key_overrides",
+        "alt_repeat_keys",
+        "settings",
+        "lighting"
+      ],
+      "title": "Configuration",
+      "type": "object"
+    },
+    "DeviceIdentity": {
+      "additionalProperties": false,
+      "description": "How a keyboard was recognized. `device_id` only selects it for this plug session.",
+      "properties": {
+        "binding_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Binding Id"
+        },
+        "device_id": {
+          "title": "Device Id",
+          "type": "string"
+        },
+        "identity_confidence": {
+          "default": "unknown",
+          "enum": [
+            "usb_serial",
+            "model_and_firmware",
+            "unknown"
+          ],
+          "title": "Identity Confidence",
+          "type": "string"
+        },
+        "identity_note": {
+          "default": "",
+          "title": "Identity Note",
+          "type": "string"
+        },
+        "layout_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Layout Fingerprint"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "product_id": {
+          "title": "Product Id",
+          "type": "string"
+        },
+        "serial_number": {
+          "title": "Serial Number",
+          "type": "string"
+        },
+        "simulated": {
+          "default": false,
+          "title": "Simulated",
+          "type": "boolean"
+        },
+        "vendor_id": {
+          "title": "Vendor Id",
+          "type": "string"
+        },
+        "via_protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Via Protocol"
+        },
+        "vial_protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vial Protocol"
+        },
+        "vial_uid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vial Uid"
+        }
+      },
+      "required": [
+        "device_id",
+        "name",
+        "vendor_id",
+        "product_id",
+        "serial_number",
+        "path"
+      ],
+      "title": "DeviceIdentity",
+      "type": "object"
+    },
+    "EncoderEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "title": "Direction",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "keycode": {
+          "title": "Keycode",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "layer": {
+          "title": "Layer",
+          "type": "integer"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "raw",
+        "keycode",
+        "label",
+        "layer",
+        "index",
+        "direction"
+      ],
+      "title": "EncoderEntry",
+      "type": "object"
+    },
+    "KeyGeometry": {
+      "additionalProperties": false,
+      "properties": {
+        "col": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Col"
+        },
+        "decal": {
+          "default": false,
+          "title": "Decal",
+          "type": "boolean"
+        },
+        "encoder_direction": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Encoder Direction"
+        },
+        "encoder_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Encoder Index"
+        },
+        "height": {
+          "title": "Height",
+          "type": "number"
+        },
+        "height2": {
+          "default": 1,
+          "title": "Height2",
+          "type": "number"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "layout_index": {
+          "default": -1,
+          "title": "Layout Index",
+          "type": "integer"
+        },
+        "layout_option": {
+          "default": -1,
+          "title": "Layout Option",
+          "type": "integer"
+        },
+        "rotation_angle": {
+          "default": 0,
+          "title": "Rotation Angle",
+          "type": "number"
+        },
+        "rotation_x": {
+          "default": 0,
+          "title": "Rotation X",
+          "type": "number"
+        },
+        "rotation_y": {
+          "default": 0,
+          "title": "Rotation Y",
+          "type": "number"
+        },
+        "row": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row"
+        },
+        "width": {
+          "title": "Width",
+          "type": "number"
+        },
+        "width2": {
+          "default": 1,
+          "title": "Width2",
+          "type": "number"
+        },
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "x2": {
+          "default": 0,
+          "title": "X2",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        },
+        "y2": {
+          "default": 0,
+          "title": "Y2",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "title": "KeyGeometry",
+      "type": "object"
+    },
+    "KeymapEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "col": {
+          "title": "Col",
+          "type": "integer"
+        },
+        "keycode": {
+          "title": "Keycode",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "layer": {
+          "title": "Layer",
+          "type": "integer"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "integer"
+        },
+        "row": {
+          "title": "Row",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "raw",
+        "keycode",
+        "label",
+        "layer",
+        "row",
+        "col"
+      ],
+      "title": "KeymapEntry",
+      "type": "object"
+    },
+    "LayoutGeometry": {
+      "additionalProperties": false,
+      "properties": {
+        "encoders": {
+          "items": {
+            "$ref": "#/$defs/KeyGeometry"
+          },
+          "title": "Encoders",
+          "type": "array"
+        },
+        "keys": {
+          "items": {
+            "$ref": "#/$defs/KeyGeometry"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
+        "layout_choices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Layout Choices",
+          "type": "array"
+        },
+        "layout_options": {
+          "title": "Layout Options",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "keys",
+        "encoders",
+        "layout_options",
+        "layout_choices"
+      ],
+      "title": "LayoutGeometry",
+      "type": "object"
+    },
+    "LightingState": {
+      "additionalProperties": false,
+      "description": "Values the firmware reports now. Firmware does not say whether they are saved.",
+      "properties": {
+        "backlight": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backlight"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "rgblight": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rgblight"
+        },
+        "vialrgb": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vialrgb"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "LightingState",
+      "type": "object"
+    },
+    "MacroState": {
+      "additionalProperties": false,
+      "properties": {
+        "buffer_b64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Buffer B64"
+        },
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "macros": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {},
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Macros"
+        },
+        "memory_bytes": {
+          "title": "Memory Bytes",
+          "type": "integer"
+        },
+        "redacted": {
+          "default": false,
+          "title": "Redacted",
+          "type": "boolean"
+        },
+        "used_bytes": {
+          "title": "Used Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count",
+        "memory_bytes",
+        "used_bytes"
+      ],
+      "title": "MacroState",
+      "type": "object"
+    },
+    "SettingsState": {
+      "additionalProperties": false,
+      "properties": {
+        "unknown_qsids": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Unknown Qsids",
+          "type": "array"
+        },
+        "values": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Values",
+          "type": "object"
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "title": "SettingsState",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "capabilities": {
+      "$ref": "#/$defs/Capabilities"
+    },
+    "configuration": {
+      "$ref": "#/$defs/Configuration"
+    },
+    "coverage": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Coverage",
+      "type": "object"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceIdentity"
+    },
+    "family_fingerprints": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Family Fingerprints",
+      "type": "object"
+    },
+    "kind": {
+      "const": "snapshot",
+      "default": "snapshot",
+      "title": "Kind",
+      "type": "string"
+    },
+    "layout": {
+      "$ref": "#/$defs/LayoutGeometry"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "created_at",
+    "device",
+    "capabilities",
+    "layout",
+    "configuration",
+    "family_fingerprints",
+    "coverage"
+  ],
+  "title": "Snapshot",
+  "type": "object"
+}

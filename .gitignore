@@ -4,3 +4,9 @@ deps
 build
 vial-gui
 via-keymap-precompiled
+.venv
+dist
+__pycache__
+.pytest_cache
+*.pyc
+*.egg-info

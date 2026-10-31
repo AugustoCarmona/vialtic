@@ -1,6 +1,6 @@
 # Implementation plan
 
-All milestones are pending. Update STATUS.md with evidence as work proceeds. Do not implement the entire project without validating the reuse boundary first.
+Actual progress, evidence and open items for each milestone are in STATUS.md, which takes precedence over this plan's wording about state. Update it as work proceeds. Do not implement the entire project without validating the reuse boundary first.
 
 ## M0 — Reuse and packaging feasibility
 

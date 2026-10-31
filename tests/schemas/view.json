@@ -1,0 +1,193 @@
+{
+  "$defs": {
+    "DeviceIdentity": {
+      "additionalProperties": false,
+      "description": "How a keyboard was recognized. `device_id` only selects it for this plug session.",
+      "properties": {
+        "binding_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Binding Id"
+        },
+        "device_id": {
+          "title": "Device Id",
+          "type": "string"
+        },
+        "identity_confidence": {
+          "default": "unknown",
+          "enum": [
+            "usb_serial",
+            "model_and_firmware",
+            "unknown"
+          ],
+          "title": "Identity Confidence",
+          "type": "string"
+        },
+        "identity_note": {
+          "default": "",
+          "title": "Identity Note",
+          "type": "string"
+        },
+        "layout_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Layout Fingerprint"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "product_id": {
+          "title": "Product Id",
+          "type": "string"
+        },
+        "serial_number": {
+          "title": "Serial Number",
+          "type": "string"
+        },
+        "simulated": {
+          "default": false,
+          "title": "Simulated",
+          "type": "boolean"
+        },
+        "vendor_id": {
+          "title": "Vendor Id",
+          "type": "string"
+        },
+        "via_protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Via Protocol"
+        },
+        "vial_protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vial Protocol"
+        },
+        "vial_uid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vial Uid"
+        }
+      },
+      "required": [
+        "device_id",
+        "name",
+        "vendor_id",
+        "product_id",
+        "serial_number",
+        "path"
+      ],
+      "title": "DeviceIdentity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact_path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifact Path"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceIdentity"
+    },
+    "format": {
+      "enum": [
+        "text",
+        "png"
+      ],
+      "title": "Format",
+      "type": "string"
+    },
+    "kind": {
+      "const": "view",
+      "default": "view",
+      "title": "Kind",
+      "type": "string"
+    },
+    "layers": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Layers",
+      "type": "array"
+    },
+    "proposal_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Proposal Id"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "device",
+    "layers",
+    "format",
+    "text"
+  ],
+  "title": "ViewResult",
+  "type": "object"
+}

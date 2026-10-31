@@ -1,0 +1,62 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "frozen": {
+      "title": "Frozen",
+      "type": "boolean"
+    },
+    "kind": {
+      "const": "version",
+      "default": "version",
+      "title": "Kind",
+      "type": "string"
+    },
+    "platform": {
+      "title": "Platform",
+      "type": "string"
+    },
+    "python": {
+      "title": "Python",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "supported_via_protocols": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Supported Via Protocols",
+      "type": "array"
+    },
+    "supported_vial_protocols": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Supported Vial Protocols",
+      "type": "array"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    },
+    "vial_gui_revision": {
+      "title": "Vial Gui Revision",
+      "type": "string"
+    }
+  },
+  "required": [
+    "version",
+    "vial_gui_revision",
+    "supported_via_protocols",
+    "supported_vial_protocols",
+    "python",
+    "platform",
+    "frozen"
+  ],
+  "title": "VersionInfo",
+  "type": "object"
+}

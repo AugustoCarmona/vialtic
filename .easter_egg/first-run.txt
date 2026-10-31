@@ -1,0 +1,162 @@
+Proposal pr-babe3b6607945aa7951f (change)
+Keyboard: foostan Corne [dev-bb9d10f1]
+Expires: 2026-10-31T20:09:45.561744+00:00
+
+Changes (1):
+  layer 1 key 6,2: KC_NO -> KC_F13
+
+Warnings:
+  The USB serial is only the shared Vial marker and the Vial UID identifies the firmware, so identical keyboards cannot be told apart.
+
+Verification: After writing, every configuration family except transient lighting is read back from the keyboard and compared with the expected result.
+Recovery: Everything Vialtic can read from the keyboard is saved before the first write; any exceptions are listed in the warnings. If a write or the read-back fails, Vialtic tries to restore that saved state within the reconnect window, without further approval. If it cannot, the backup is kept and the exact recovery command is reported.
+
+Nothing has been written. After the user explicitly approves this exact proposal, run:a
+  vialtic apply pr-babe3b6607945aa7951f --user-approved
+
+
+vialtic main  ? ❯ .venv/bin/vialtic view --layer 0
+foostan Corne - layer 0
+                +-------+-------+-------+                                           +-------+-------+-------+
+                |W      |E      |R      +-------+                           +-------+TD(0)  |I      |O      |
++-------+-------+0,2    |0,3    |0,4    |T      |                           |Y      |4,4    |4,3    |4,2    +-------+-------+
+|LALT   |Q      |       |       |       |0,5    |                           |4,5    |       |       |       |P      |BSPACE |
+|0,0    |0,1    +-------+-------+-------+       |                           |       +-------+-------+-------+4,1    |4,0    |
+|       |       |S      |D      |LSFT_T(+-------+                           +-------+LSFT_T(|K      |L      |       |       |
++-------+-------+1,2    |1,3    |F)     |G      |                           |H      |J)     |5,3    |5,2    +-------+-------+
+|LSHIFT |A      |       |       |1,4    |1,5    |                           |5,5    |5,4    |       |       |SCOLON |QUOTE  |
+|1,0    |1,1    +-------+-------+-------+       |                           |       +-------+-------+-------+5,1    |5,0    |
+|       |       |X      |C      |V      +-------+                           +-------+M      |COMMA  |DOT    |       |       |
++-------+-------+2,2    |2,3    |2,4    |B      |                           |N      |6,4    |6,3    |6,2    +-------+-------+
+|LCTRL  |Z      |       |       |       |2,5    |                           |6,5    |       |       |       |SLASH  |ENTER  |
+|2,0    |2,1    +-------+-------+-------+       |                           |       +-------+-------+-------+6,1    |6,0    |
+|       |       |           +-------+   +-------+                           +-------+   +-------+           |       |       |
++-------+-------+           |LT3(1) |+-------++-------+               +-------++-------+|TD(1)  |           +-------+-------+
+                            |3,3    ||LT2(   ||LGUI_T(|               |LT1(   ||VOLDOWN||7,3    |
+                            |       ||MINUS) ||ESCAPE)|               |SPACE) ||7,4~   ||       |
+                            +-------+|3,4~   ||3,5~   |               |7,5~   ||       |+-------+
+                                     +-------+|       |               |       |+-------+
+                                              |       |               |       |
+                                              +-------+               +-------+
+
+Legend: ___ transparent (uses the layer below)  XXX disabled (KC_NO)  r,c matrix position  ~ rotated key, approximate position  * changed by the proposal  ! hold to unlock
+
+vialtic main  ? ❯ .venv/bin/vialtic view --layer 1 --proposal pr-babe3b6607945aa7951f
+foostan Corne - layer 1 - proposal pr-babe3b6607945aa7951f
+                +-------+-------+-------+                                           +-------+-------+-------+
+                |LSFT(NO|RSFT(8)|RSFT(9)+-------+                           +-------+RALT(  |UP     |XXX    |
++-------+-------+NUS_BS~|0,3    |0,4    |KP_    |                           |XXX    |MINUS) |4,3    |4,2    +-------+-------+
+|TAB    |NONUS_ |0,2    |       |       |COMMA  |                           |4,5    |4,4    |       |       |PGUP   |DELETE |
+|0,0    |BSLASH +-------+-------+-------+0,5    |                           |       +-------+-------+-------+4,1    |4,0    |
+|       |0,1    |LSFT(5)|RALT(LB|RALT(RB+-------+                           +-------+LEFT   |DOWN   |RIGHT  |       |       |
++-------+-------+1,2    |RACKET)|RACKET)|LSFT(2)|                           |XXX    |5,4    |5,3    |5,2    +-------+-------+
+|LSHIFT |LSFT(6)|       |1,3    |1,4    |1,5    |                           |5,5    |       |       |       |PGDOWN |XXX    |
+|1,0    |1,1    +-------+-------+-------+       |                           |       +-------+-------+-------+5,1    |5,0    |
+|       |       |RALT(3)|RALT(  |RALT(NO+-------+                           +-------+XXX    |XXX    |F13    |       |       |
++-------+-------+2,2    |QUOTE) |NUS_HA~|MINUS  |                           |XXX    |6,4    |6,3    |6,2*   +-------+-------+
+|LALT   |RSFT(  |       |2,3    |2,4    |2,5    |                           |6,5    |       |       |       |XXX    |XXX    |
+|2,0    |GRAVE) +-------+-------+-------+       |                           |       +-------+-------+-------+6,1    |6,0    |
+|       |2,1    |           +-------+   +-------+                           +-------+   +-------+           |       |       |
++-------+-------+           |XXX    |+-------++-------+               +-------++-------+|RALT   |           +-------+-------+
+                            |3,3    ||XXX    ||LGUI   |               |ENTER  ||___    ||7,3    |
+                            |       ||3,4~   ||3,5~   |               |7,5~   ||7,4~   ||       |
+                            +-------+|       ||       |               |       ||       |+-------+
+                                     +-------+|       |               |       |+-------+
+                                              |       |               |       |
+                                              +-------+               +-------+
+Full names: 0,2: LSFT(KC_NONUS_BSLASH); 2,4: RALT(KC_NONUS_HASH)
+
+Proposed changes in pr-babe3b6607945aa7951f:
+  layer 1 key 6,2  before: KC_NO  after: KC_F13
+Keys marked * show the value after the proposal.
+Legend: ___ transparent (uses the layer below)  XXX disabled (KC_NO)  r,c matrix position  ~ rotated key, approximate position  * changed by the proposal  ! hold to unlock
+
+vialtic main  ? ❯ .venv/bin/vialtic apply pr-babe3b6607945aa7951f --user-approved
+Outcome: verified
+Applied and verified 1 operation(s).
+Keyboard: foostan Corne [dev-bb9d10f1] 0x4653:0x0001
+  [applied] layer 1 key 6,2: KC_NO -> KC_F13
+Backup: /home/nox/.local/state/vialtic/devices/e41af61da3fba6378e38d308/previous.json
+Revert with `vialtic undo plan`.
+
+vialtic main  ? ❯ .venv/bin/vialtic view --layer 1
+foostan Corne - layer 1
+                +-------+-------+-------+                                           +-------+-------+-------+
+                |LSFT(NO|RSFT(8)|RSFT(9)+-------+                           +-------+RALT(  |UP     |XXX    |
++-------+-------+NUS_BS~|0,3    |0,4    |KP_    |                           |XXX    |MINUS) |4,3    |4,2    +-------+-------+
+|TAB    |NONUS_ |0,2    |       |       |COMMA  |                           |4,5    |4,4    |       |       |PGUP   |DELETE |
+|0,0    |BSLASH +-------+-------+-------+0,5    |                           |       +-------+-------+-------+4,1    |4,0    |
+|       |0,1    |LSFT(5)|RALT(LB|RALT(RB+-------+                           +-------+LEFT   |DOWN   |RIGHT  |       |       |
++-------+-------+1,2    |RACKET)|RACKET)|LSFT(2)|                           |XXX    |5,4    |5,3    |5,2    +-------+-------+
+|LSHIFT |LSFT(6)|       |1,3    |1,4    |1,5    |                           |5,5    |       |       |       |PGDOWN |XXX    |
+|1,0    |1,1    +-------+-------+-------+       |                           |       +-------+-------+-------+5,1    |5,0    |
+|       |       |RALT(3)|RALT(  |RALT(NO+-------+                           +-------+XXX    |XXX    |F13    |       |       |
++-------+-------+2,2    |QUOTE) |NUS_HA~|MINUS  |                           |XXX    |6,4    |6,3    |6,2    +-------+-------+
+|LALT   |RSFT(  |       |2,3    |2,4    |2,5    |                           |6,5    |       |       |       |XXX    |XXX    |
+|2,0    |GRAVE) +-------+-------+-------+       |                           |       +-------+-------+-------+6,1    |6,0    |
+|       |2,1    |           +-------+   +-------+                           +-------+   +-------+           |       |       |
++-------+-------+           |XXX    |+-------++-------+               +-------++-------+|RALT   |           +-------+-------+
+                            |3,3    ||XXX    ||LGUI   |               |ENTER  ||___    ||7,3    |
+                            |       ||3,4~   ||3,5~   |               |7,5~   ||7,4~   ||       |
+                            +-------+|       ||       |               |       ||       |+-------+
+                                     +-------+|       |               |       |+-------+
+                                              |       |               |       |
+                                              +-------+               +-------+
+Full names: 0,2: LSFT(KC_NONUS_BSLASH); 2,4: RALT(KC_NONUS_HASH)
+
+Legend: ___ transparent (uses the layer below)  XXX disabled (KC_NO)  r,c matrix position  ~ rotated key, approximate position  * changed by the proposal  ! hold to unlock
+
+vialtic main  ? ❯ .venv/bin/vialtic undo plan
+Proposal pr-f37ed8018e8b3d8095d0 (undo)
+Keyboard: foostan Corne [dev-bb9d10f1]
+Expires: 2026-10-31T20:12:15.176505+00:00
+
+Changes (1):
+  layer 1 key 6,2: KC_F13 -> KC_NO
+
+Warnings:
+  After this undo, the configuration being replaced becomes the single previous state.
+  The USB serial is only the shared Vial marker and the Vial UID identifies the firmware, so identical keyboards cannot be told apart.
+
+Verification: After writing, every configuration family except transient lighting is read back from the keyboard and compared with the expected result.
+Recovery: Everything Vialtic can read from the keyboard is saved before the first write; any exceptions are listed in the warnings. If a write or the read-back fails, Vialtic tries to restore that saved state within the reconnect window, without further approval. If it cannot, the backup is kept and the exact recovery command is reported.
+
+Nothing has been written. After the user explicitly approves this exact proposal, run:
+  vialtic apply pr-f37ed8018e8b3d8095d0 --user-approved
+
+vialtic main  ? ❯ .venv/bin/vialtic apply pr-f37ed8018e8b3d8095d0 --user-approved
+Outcome: verified
+Applied and verified 1 operation(s).
+Keyboard: foostan Corne [dev-bb9d10f1] 0x4653:0x0001
+  [applied] layer 1 key 6,2: KC_F13 -> KC_NO
+Backup: /home/nox/.local/state/vialtic/devices/e41af61da3fba6378e38d308/previous.json
+Revert with `vialtic undo plan`.
+
+vialtic main  ? ❯ .venv/bin/vialtic view --layer 1
+foostan Corne - layer 1
+                +-------+-------+-------+                                           +-------+-------+-------+
+                |LSFT(NO|RSFT(8)|RSFT(9)+-------+                           +-------+RALT(  |UP     |XXX    |
++-------+-------+NUS_BS~|0,3    |0,4    |KP_    |                           |XXX    |MINUS) |4,3    |4,2    +-------+-------+
+|TAB    |NONUS_ |0,2    |       |       |COMMA  |                           |4,5    |4,4    |       |       |PGUP   |DELETE |
+|0,0    |BSLASH +-------+-------+-------+0,5    |                           |       +-------+-------+-------+4,1    |4,0    |
+|       |0,1    |LSFT(5)|RALT(LB|RALT(RB+-------+                           +-------+LEFT   |DOWN   |RIGHT  |       |       |
++-------+-------+1,2    |RACKET)|RACKET)|LSFT(2)|                           |XXX    |5,4    |5,3    |5,2    +-------+-------+
+|LSHIFT |LSFT(6)|       |1,3    |1,4    |1,5    |                           |5,5    |       |       |       |PGDOWN |XXX    |
+|1,0    |1,1    +-------+-------+-------+       |                           |       +-------+-------+-------+5,1    |5,0    |
+|       |       |RALT(3)|RALT(  |RALT(NO+-------+                           +-------+XXX    |XXX    |XXX    |       |       |
++-------+-------+2,2    |QUOTE) |NUS_HA~|MINUS  |                           |XXX    |6,4    |6,3    |6,2    +-------+-------+
+|LALT   |RSFT(  |       |2,3    |2,4    |2,5    |                           |6,5    |       |       |       |XXX    |XXX    |
+|2,0    |GRAVE) +-------+-------+-------+       |                           |       +-------+-------+-------+6,1    |6,0    |
+|       |2,1    |           +-------+   +-------+                           +-------+   +-------+           |       |       |
++-------+-------+           |XXX    |+-------++-------+               +-------++-------+|RALT   |           +-------+-------+
+                            |3,3    ||XXX    ||LGUI   |               |ENTER  ||___    ||7,3    |
+                            |       ||3,4~   ||3,5~   |               |7,5~   ||7,4~   ||       |
+                            +-------+|       ||       |               |       ||       |+-------+
+                                     +-------+|       |               |       |+-------+
+                                              |       |               |       |
+                                              +-------+               +-------+
+Full names: 0,2: LSFT(KC_NONUS_BSLASH); 2,4: RALT(KC_NONUS_HASH)
+
+Legend: ___ transparent (uses the layer below)  XXX disabled (KC_NO)  r,c matrix position  ~ rotated key, approximate position  * changed by the proposal  ! hold to unlock
+
+vialtic main  ? ❯ 

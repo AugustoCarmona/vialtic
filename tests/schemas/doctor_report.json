@@ -1,0 +1,278 @@
+{
+  "$defs": {
+    "DeviceEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/DeviceIdentity"
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "permission_denied",
+            "busy",
+            "unsupported_protocol",
+            "error"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "status"
+      ],
+      "title": "DeviceEntry",
+      "type": "object"
+    },
+    "DeviceIdentity": {
+      "additionalProperties": false,
+      "description": "How a keyboard was recognized. `device_id` only selects it for this plug session.",
+      "properties": {
+        "binding_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Binding Id"
+        },
+        "device_id": {
+          "title": "Device Id",
+          "type": "string"
+        },
+        "identity_confidence": {
+          "default": "unknown",
+          "enum": [
+            "usb_serial",
+            "model_and_firmware",
+            "unknown"
+          ],
+          "title": "Identity Confidence",
+          "type": "string"
+        },
+        "identity_note": {
+          "default": "",
+          "title": "Identity Note",
+          "type": "string"
+        },
+        "layout_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Layout Fingerprint"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "product_id": {
+          "title": "Product Id",
+          "type": "string"
+        },
+        "serial_number": {
+          "title": "Serial Number",
+          "type": "string"
+        },
+        "simulated": {
+          "default": false,
+          "title": "Simulated",
+          "type": "boolean"
+        },
+        "vendor_id": {
+          "title": "Vendor Id",
+          "type": "string"
+        },
+        "via_protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Via Protocol"
+        },
+        "vial_protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vial Protocol"
+        },
+        "vial_uid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vial Uid"
+        }
+      },
+      "required": [
+        "device_id",
+        "name",
+        "vendor_id",
+        "product_id",
+        "serial_number",
+        "path"
+      ],
+      "title": "DeviceIdentity",
+      "type": "object"
+    },
+    "DoctorCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "next_steps": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Next Steps",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "warning",
+            "problem",
+            "info"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "message"
+      ],
+      "title": "DoctorCheck",
+      "type": "object"
+    },
+    "ErrorInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "next_steps": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Next Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ErrorInfo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/DoctorCheck"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "devices": {
+      "items": {
+        "$ref": "#/$defs/DeviceEntry"
+      },
+      "title": "Devices",
+      "type": "array"
+    },
+    "kind": {
+      "const": "doctor_report",
+      "default": "doctor_report",
+      "title": "Kind",
+      "type": "string"
+    },
+    "platform": {
+      "title": "Platform",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "simulated": {
+      "title": "Simulated",
+      "type": "boolean"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "version",
+    "platform",
+    "simulated",
+    "checks",
+    "devices"
+  ],
+  "title": "DoctorReport",
+  "type": "object"
+}

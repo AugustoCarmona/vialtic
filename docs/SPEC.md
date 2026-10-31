@@ -1,6 +1,6 @@
 # Vialtic specification
 
-Status: accepted product specification, implementation pending. Date: 2026-10-30.
+Status: accepted product specification, implementation in progress (see STATUS.md). Date: 2026-10-30.
 Owner: Augusto Carmona. Repository: https://github.com/AugustoCarmona/vialtic.
 
 ## 1. Purpose

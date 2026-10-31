@@ -2,9 +2,31 @@
 
 ## Current state
 
-**Vialtic is specified but not implemented or released.** Do not run a fabricated installer URL, suggest `pip install vialtic`/`brew install vialtic` as available, or run the old Vial Web build to install the future product. Check STATUS.md first. This guide defines the required released installation experience.
+**Vialtic is partly implemented and not released.** No installer, published package or MCP server exists. Do not run a fabricated installer URL, suggest `pip install vialtic`/`brew install vialtic` as available, or run the old Vial Web build. Check STATUS.md first. The "Released workflow contract" below defines the future released experience; today only the source setup is real.
 
 Repository entry URL: https://github.com/AugustoCarmona/vialtic
+
+## Running from source (development)
+
+Needs Python 3.12 or newer. Tested on Linux x86_64 with Python 3.12 and 3.14. macOS arm64 is not yet verified.
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install --require-hashes -r requirements.lock
+.venv/bin/pip install --no-deps -e .
+.venv/bin/vialtic doctor
+```
+
+To build a self-contained directory that needs no Python: `.venv/bin/pyinstaller --noconfirm --clean --distpath dist --workpath build/vialtic packaging/vialtic.spec`, then run `dist/vialtic/vialtic`. A build made on a recent distribution will not necessarily run on older ones; the CI workflow targets the glibc of Ubuntu 22.04 and has no recorded run yet.
+
+On Linux, non-root access needs a udev rule scoped to Vial keyboards. This rule works on the owner's Arch-based machine. Installing it is a separate elevated step that this project never performs for you, and the keyboard must be replugged afterward:
+
+```text
+# /etc/udev/rules.d/59-vial.rules
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{serial}=="*vial:f64c2b3c*", MODE="0660", TAG+="uaccess"
+```
+
+Commands and their guarantees are in [CLI.md](CLI.md).
 
 ## Released workflow contract
 

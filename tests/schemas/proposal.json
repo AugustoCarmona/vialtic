@@ -1,0 +1,400 @@
+{
+  "$defs": {
+    "Baseline": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_families": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Checked Families",
+          "type": "array"
+        },
+        "family_fingerprints": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Family Fingerprints",
+          "type": "object"
+        }
+      },
+      "required": [
+        "family_fingerprints",
+        "checked_families"
+      ],
+      "title": "Baseline",
+      "type": "object"
+    },
+    "DeviceIdentity": {
+      "additionalProperties": false,
+      "description": "How a keyboard was recognized. `device_id` only selects it for this plug session.",
+      "properties": {
+        "binding_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Binding Id"
+        },
+        "device_id": {
+          "title": "Device Id",
+          "type": "string"
+        },
+        "identity_confidence": {
+          "default": "unknown",
+          "enum": [
+            "usb_serial",
+            "model_and_firmware",
+            "unknown"
+          ],
+          "title": "Identity Confidence",
+          "type": "string"
+        },
+        "identity_note": {
+          "default": "",
+          "title": "Identity Note",
+          "type": "string"
+        },
+        "layout_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Layout Fingerprint"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "product_id": {
+          "title": "Product Id",
+          "type": "string"
+        },
+        "serial_number": {
+          "title": "Serial Number",
+          "type": "string"
+        },
+        "simulated": {
+          "default": false,
+          "title": "Simulated",
+          "type": "boolean"
+        },
+        "vendor_id": {
+          "title": "Vendor Id",
+          "type": "string"
+        },
+        "via_protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Via Protocol"
+        },
+        "vial_protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vial Protocol"
+        },
+        "vial_uid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vial Uid"
+        }
+      },
+      "required": [
+        "device_id",
+        "name",
+        "vendor_id",
+        "product_id",
+        "serial_number",
+        "path"
+      ],
+      "title": "DeviceIdentity",
+      "type": "object"
+    },
+    "KeycodeValue": {
+      "additionalProperties": false,
+      "description": "A firmware keycode. `raw` is authoritative, `keycode`/`label` are for people.",
+      "properties": {
+        "keycode": {
+          "title": "Keycode",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "raw",
+        "keycode",
+        "label"
+      ],
+      "title": "KeycodeValue",
+      "type": "object"
+    },
+    "ProposalUnlock": {
+      "additionalProperties": false,
+      "properties": {
+        "positions": {
+          "items": {
+            "$ref": "#/$defs/UnlockPosition"
+          },
+          "title": "Positions",
+          "type": "array"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "required"
+      ],
+      "title": "ProposalUnlock",
+      "type": "object"
+    },
+    "SetEncoderOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "before": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "direction": {
+          "title": "Direction",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "layer": {
+          "title": "Layer",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_encoder",
+          "default": "set_encoder",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "index",
+        "direction",
+        "before",
+        "after"
+      ],
+      "title": "SetEncoderOperation",
+      "type": "object"
+    },
+    "SetKeyOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "before": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "col": {
+          "title": "Col",
+          "type": "integer"
+        },
+        "layer": {
+          "title": "Layer",
+          "type": "integer"
+        },
+        "row": {
+          "title": "Row",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_key",
+          "default": "set_key",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "row",
+        "col",
+        "before",
+        "after"
+      ],
+      "title": "SetKeyOperation",
+      "type": "object"
+    },
+    "UnlockPosition": {
+      "additionalProperties": false,
+      "properties": {
+        "col": {
+          "title": "Col",
+          "type": "integer"
+        },
+        "row": {
+          "title": "Row",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "row",
+        "col"
+      ],
+      "title": "UnlockPosition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "affected": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Affected",
+      "type": "array"
+    },
+    "baseline": {
+      "$ref": "#/$defs/Baseline"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceIdentity"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "proposal",
+      "default": "proposal",
+      "title": "Kind",
+      "type": "string"
+    },
+    "operations": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "set_encoder": "#/$defs/SetEncoderOperation",
+            "set_key": "#/$defs/SetKeyOperation"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/SetKeyOperation"
+          },
+          {
+            "$ref": "#/$defs/SetEncoderOperation"
+          }
+        ]
+      },
+      "title": "Operations",
+      "type": "array"
+    },
+    "proposal_type": {
+      "enum": [
+        "change",
+        "undo",
+        "recovery"
+      ],
+      "title": "Proposal Type",
+      "type": "string"
+    },
+    "reconnect_window_seconds": {
+      "title": "Reconnect Window Seconds",
+      "type": "number"
+    },
+    "recovery": {
+      "title": "Recovery",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "unlock": {
+      "$ref": "#/$defs/ProposalUnlock"
+    },
+    "verification": {
+      "title": "Verification",
+      "type": "string"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "proposal_type",
+    "device",
+    "baseline",
+    "operations",
+    "affected",
+    "unlock",
+    "verification",
+    "recovery",
+    "reconnect_window_seconds",
+    "created_at",
+    "expires_at"
+  ],
+  "title": "Proposal",
+  "type": "object"
+}

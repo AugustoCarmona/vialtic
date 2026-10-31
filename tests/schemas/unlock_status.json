@@ -1,0 +1,71 @@
+{
+  "$defs": {
+    "UnlockPosition": {
+      "additionalProperties": false,
+      "properties": {
+        "col": {
+          "title": "Col",
+          "type": "integer"
+        },
+        "row": {
+          "title": "Row",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "row",
+        "col"
+      ],
+      "title": "UnlockPosition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "counter": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Counter"
+    },
+    "in_progress": {
+      "title": "In Progress",
+      "type": "boolean"
+    },
+    "kind": {
+      "const": "unlock_status",
+      "default": "unlock_status",
+      "title": "Kind",
+      "type": "string"
+    },
+    "positions": {
+      "items": {
+        "$ref": "#/$defs/UnlockPosition"
+      },
+      "title": "Positions",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "unlocked": {
+      "title": "Unlocked",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "unlocked",
+    "in_progress"
+  ],
+  "title": "UnlockStatus",
+  "type": "object"
+}

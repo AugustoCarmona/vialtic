@@ -1,0 +1,25 @@
+# revision aef8222a2d0429a183b2ed692d5f9efcfd383f08 https://github.com/vial-kb/vial-gui
+d660c1f59f356522945736b2423005b55c8cf12b43146f9d39fce89681d5017f  any_keycode.py  src/main/python/any_keycode.py
+8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643  COPYING  COPYING
+92f30d6c71885a45c7e0baba11b3e845e7e35d2fbb75bb1d2eaf2162209cc9f0  keycodes/keycodes.py  src/main/python/keycodes/keycodes.py
+02399bd2fdb507adccf35c55aef8d811c7136fcd15f97ef2b0e3050908337692  keycodes/keycodes_v5.py  src/main/python/keycodes/keycodes_v5.py
+8d3d128bd9c2dceda970f2d22edcf290e8a965b1131b0b8abbda0d664feb50cb  keycodes/keycodes_v6.py  src/main/python/keycodes/keycodes_v6.py
+1feb495081dccd8613aabea0671b32bf9cc4dd9826b112cb89256e9df8a90447  kle_serial.py  src/main/python/kle_serial.py
+19ab863af14f0238d8d7eaf3214a7114d211a3a188cc9c85890a97c44069b5ba  macro/macro_action.py  src/main/python/macro/macro_action.py
+c2d3d963feb0171c9ba4c332347a078ee65b4df71412731f7fd3ddb19af59e91  macro/macro_key.py  src/main/python/macro/macro_key.py
+6bb69162acd821db6c220083ced0a6b3fed151d820c9f862dd79f10c058c6cfe  macro/macro_optimizer.py  src/main/python/macro/macro_optimizer.py
+150653cbee9ee05bb6a34530d481481a0cc9133252c308b217fd0dd62082dc34  protocol/alt_repeat_key.py  src/main/python/protocol/alt_repeat_key.py
+6c8edb5b519f51b0ee6fbca17780b20411e912bbe860e7d5ebeabd33076e2dec  protocol/base_protocol.py  src/main/python/protocol/base_protocol.py
+ab95eb24951a6039bd9b73867ef7a87b01513e58c7c06c459ea0841c9ff88ed7  protocol/combo.py  src/main/python/protocol/combo.py
+e944a87d6bf508aaefbe0bc29f9d95dfd8ada5fc4bce28d45bf0cd794f9e86f4  protocol/constants.py  src/main/python/protocol/constants.py
+bf0b0af5b33d4f52767f5633a1207baa0679ff69d7ed91ababa79f704091c0fa  protocol/dummy_keyboard.py  src/main/python/protocol/dummy_keyboard.py
+a5f0908a7cd1e531bc276af65b971fe5756d9d636339d28c8ec506be0aab6aa6  protocol/dynamic.py  src/main/python/protocol/dynamic.py
+d71b73a6217c5d12a05ff0cd3c85ea06b8f9df798cfb5f1a783207af4623ecdb  protocol/keyboard_comm.py  src/main/python/protocol/keyboard_comm.py
+fad77f82031fe6a8a4bb219975ad78828e8d7bb69236fdddabc527a7f8b3e2fe  protocol/key_override.py  src/main/python/protocol/key_override.py
+dbd444ae1b16d562d72fb8707fe7528c30ea31401edcf6738232e84c818e8d84  protocol/macro.py  src/main/python/protocol/macro.py
+b52e93e1cb67336c3cb2c2ba83572d92ba338debe0722f084417fd0798209d00  protocol/tap_dance.py  src/main/python/protocol/tap_dance.py
+5b8bf8644915613847b8bfb99bdcbcb5eff018d95aef5c03d2a1b61062ef08a8  resources/qmk_settings.json  src/main/resources/base/qmk_settings.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  test/__init__.py  src/main/python/test/__init__.py
+66f731b46f0fe79f765da4459d55cf94e9788dcf3ff468749bb1c0e4f228672b  test/test_keyboard.py  src/main/python/test/test_keyboard.py
+238b36b8d76cdfadbbd35ac58594db43512c6c2db492f6b2e2939c1e7717d2f7  test/test_keycode.py  src/main/python/test/test_keycode.py
+91d83a477f7f82d2be75792707998615016dc34d8f45484de36e26c92b386f52  test/test_macro.py  src/main/python/test/test_macro.py

@@ -12,11 +12,43 @@ this idea was born on friday, october 30, after an extreme day of work. to clear
 
 ## Project status
 
-**Specification complete; Vialtic implementation has not started.** No Vialtic installer, executable, release, or MCP server is available yet. The existing source and build scripts belong to upstream Vial Web and do not implement the product described here.
+**Early development, usable for a first test from source.** There is no release, installer or MCP server yet. Implemented so far: a command line tool that reads USB Vial keyboards, renders them as text or PNG, and changes keymap keys and encoders through reviewable proposals with a backup, read-back verification, undo and failure recovery.
 
-Vialtic will let your existing agent inspect and configure USB-connected Vial keyboards. It will show proposed changes, wait for your approval, save the previous configuration, apply changes, and verify the result. Terminal agents receive text views; clients that support images can show a keyboard image in the conversation.
+| Area | State |
+| --- | --- |
+| Discovery, full read-only snapshot, text and PNG views | Implemented. Read-only use verified on a real Corne on Linux x86_64. |
+| Proposal, approval, write, read-back, undo, recovery for keymap keys and encoders | Implemented and tested on the emulator. One key change, read-back and undo verified on a real Corne on Linux x86_64. Encoders and failure recovery are emulator-tested only. |
+| Other features: macros, tap dance, combos, key overrides, alternate repeat keys, QMK settings, lighting, layout options | Read and backed up. Writing them is planned (M3), and Vialtic refuses it for now. |
+| Named profiles, `.vil` interchange | Planned (M4). |
+| MCP server for agents | Planned (M5). Agents with terminal access can use the CLI. |
+| Installer, updates, Homebrew | Planned (M6). |
+| macOS Apple Silicon | Planned target. The CI workflow has no recorded run yet, and nothing is verified on macOS. |
 
-The first release targets Linux x86_64 and macOS Apple Silicon. Vialtic runs locally without accounts, telemetry, a hosted model, API keys, or configuration uploads. Your chosen agent has its own data-processing behavior.
+Vialtic will let your existing agent inspect and configure USB-connected Vial keyboards: it shows proposed changes, waits for your approval, saves the previous configuration, applies changes and verifies the result. It runs locally without accounts, telemetry, a hosted model, API keys, or configuration uploads. Your chosen agent has its own data-processing behavior.
+
+## Try it from source
+
+Needs Python 3.12 or newer. See [`docs/INSTALL.md`](docs/INSTALL.md) for Linux permissions.
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install --require-hashes -r requirements.lock
+.venv/bin/pip install --no-deps -e .
+
+.venv/bin/vialtic doctor                 # reads only
+.venv/bin/vialtic view --layer 0         # reads only
+.venv/bin/vialtic view --emulator split  # no keyboard needed
+```
+
+Changing a key takes a proposal, which writes nothing, followed by an explicit apply:
+
+```sh
+.venv/bin/vialtic plan --set '1:0,2=LGUI(KC_3)'
+.venv/bin/vialtic apply <proposal-id> --user-approved
+.venv/bin/vialtic undo plan
+```
+
+Commands, guarantees and limitations are in [`docs/CLI.md`](docs/CLI.md).
 
 ## Start contributing
 
@@ -24,7 +56,7 @@ Give your agent the repository URL and ask:
 
 > Read AGENTS.md and implement the next incomplete milestone in docs/PLAN.md, following docs/SPEC.md. Update docs/STATUS.md with the result and verification evidence.
 
-For installation after releases exist, the same repository will direct agents to [`docs/INSTALL.md`](docs/INSTALL.md). Downloading the source alone does not install Vialtic. There is no one-click installation claim for clients without local execution access.
+Run the tests with `.venv/bin/python -m pytest`. They use the built-in emulator and need no keyboard.
 
 ## Documentation
 
@@ -32,13 +64,14 @@ For installation after releases exist, the same repository will direct agents to
 - [Complete product and engineering specification](docs/SPEC.md)
 - [Implementation plan and acceptance criteria](docs/PLAN.md)
 - [Current state and handoff](docs/STATUS.md)
+- [CLI contract](docs/CLI.md)
 - [Installation contract](docs/INSTALL.md)
 - [Windows implementation guide](docs/WINDOWS.md)
 - [Upstream reuse and attribution](docs/UPSTREAM.md)
 
 ## Freedom and attribution
 
-New Vialtic code will use GPL-2.0-or-later. Preserve upstream notices and licenses for all reused material. Vialtic is based on [Vial](https://github.com/vial-kb/vial-gui); this checkout originated from [Vial Web](https://github.com/vial-kb/vial-web). See [COPYING](COPYING) and [upstream provenance](docs/UPSTREAM.md).
+New Vialtic code uses GPL-2.0-or-later. Preserve upstream notices and licenses for all reused material. Vialtic is based on [Vial](https://github.com/vial-kb/vial-gui); this checkout originated from [Vial Web](https://github.com/vial-kb/vial-web). See [COPYING](COPYING) and [upstream provenance](docs/UPSTREAM.md).
 
 <p align="center">
   <img src="assets/mascot/turtle-tug-of-war.png" alt="Two turtles pulling on a lettuce leaf" width="640">

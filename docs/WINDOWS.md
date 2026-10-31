@@ -21,4 +21,4 @@ Windows is intentionally outside v1's supported binaries. A contributor using an
 6. Extend CI and run all emulator/format/approval/backup/CLI/MCP tests. Run approved real-device write/readback/undo on Windows.
 7. Document unsigned/signing limitations accurately, preserve upstream notices and add tested support to the platform matrix only after the checks pass.
 
-No Windows implementation exists yet. This guide is a specification for a future contribution, not a promise that Unix installer commands work on Windows.
+The current lock implementation in `src/vialtic/storage.py` uses `fcntl` and its atomic writes use `os.fchmod`, both of which need Windows equivalents. No Windows implementation exists yet. This guide is a specification for a future contribution, not a promise that Unix installer commands work on Windows.

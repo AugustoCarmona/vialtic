@@ -4,44 +4,70 @@ Last updated: 2026-10-31.
 
 ## Actual state
 
-- Replaced the README footer illustration with the owner-provided `Turtle Tug-of-War Over Lettuce.png`, stored as `assets/mascot/turtle-tug-of-war.png`, with descriptive alt text. Verified the copied PNG matches the supplied file, the README asset reference resolves, and `git diff --check` passes. The owner requested committing and pushing this replacement together with the pending documentation changes. Implementation remains paused; no runtime or hardware behavior changed.
+M1 and M2 gates are met. M0 is done on Linux x86_64, with its macOS and CI items open. One approved keymap change, read-back and undo is hardware-verified on the owner's Corne. This work was pushed to `main` at the owner's request; no release, tag, agent configuration or system setting was created or changed.
 
-- Added the owner-provided walking turtle mascot from `vialtic-web-kit.zip` to the end of README.md, after Freedom and attribution. Verified PNG integrity, README asset reference and `git diff --check`; no runtime or hardware behavior changed.
+Layout added: `src/vialtic/` (CLI, service, proposals, storage, device, adapter, render, emulator), `vendor/vial/` (pinned Vial GUI subset), `tests/`, `packaging/`, `requirements.lock`, `.github/workflows/ci.yml`, `docs/CLI.md`. The Vial Web sources at the root are untouched.
 
-- Documentation maintenance rule added to AGENTS.md and SPEC.md: every code change must include reviewing and updating README.md from “Project status” onward and all affected documentation before the change is considered complete. Documentation-only verification: `git diff --check` passed.
-
-- Product interview complete and accepted decisions recorded in SPEC.md.
-- Agent entrypoint, plan, install contract, Windows guide and upstream review written.
-- This checkout originates from Vial Web; its application source/build scripts remain unchanged. The inherited `.github/workflows/main.yml` web-build CI was removed at the owner’s request because it does not validate Vialtic. Python CI will be introduced during implementation. It is not a working Vialtic application.
-- Python Vial GUI source inspected separately to locate reuse/headless seams; no application code vendored yet.
-- No Vialtic runtime dependencies installed, builds run, tests implemented, installer published, or GitHub repository created by this work. The owner subsequently requested committing and pushing the documentation to the existing empty personal repository.
-- Local directory: `~/Projects/vialtic`. Personal remote `origin`: `https://github.com/AugustoCarmona/vialtic.git`. Existing original remote remains `upstream`.
-- New-code license decision: GPL-2.0-or-later. COPYING retains upstream GPL v2 text.
+Earlier documentation history: product interview complete, decisions in SPEC.md, inherited web CI removed at the owner's request, README origin note lowercase without quotation marks, mascot added, documentation maintenance rule added to AGENTS.md and SPEC.md. Local directory `~/Projects/vialtic`, personal remote `origin` `https://github.com/AugustoCarmona/vialtic.git`, original remote `upstream`. New-code license GPL-2.0-or-later.
 
 ## Milestones
 
-M0–M7 in PLAN.md are all pending. Documentation planning is complete; product implementation has not started.
+### M0: reuse and packaging feasibility. Done on Linux x86_64; macOS open.
 
-## Evidence collected
+- Done: pinned subset vendored with a hash manifest; five headless seams (about 160 lines) replace everything that imported Qt; upstream's `protocol/`, `keycodes/` and codecs run unmodified. No protocol rewrite and no offscreen Qt adapter. Measurements and decisions are in UPSTREAM.md.
+- Done: `pyproject.toml`, hash-locked `requirements.lock`, PyInstaller directory build on Linux x86_64 that runs with an empty environment.
+- **Open:** the CI workflow (Ubuntu 22.04 x86_64, macOS 14 arm64) has no recorded run yet; the push of this work is its first. Until a result is recorded here there is no macOS build, no macOS evidence, and no recorded glibc baseline. The local binary was built on a current Arch-based system and is not claimed to run elsewhere.
 
-- Inspected pinned Vial Web `src/build.sh`: bundles Vial GUI Python and Qt into browser build.
-- Inspected Vial GUI protocol modules, imports, DummyKeyboard, `.vil` save/restore, unlock UI and requirements at revision recorded in UPSTREAM.md.
-- Confirmed `.vil` is JSON bytes and omits lighting; protocol reuse requires separating Qt-dependent imports.
-- Documentation checks passed: relative Markdown links resolve; `git diff --check` is clean; transcript contains all 48 user turns through the final interview answer; the initial specification changed only README.md among tracked upstream files; the inherited web CI was subsequently removed; COPYING is byte-identical to the reviewed upstream text. No runtime or hardware compatibility is claimed from these checks.
+### M1: contracts, discovery, read-only views. Gate met.
 
-## Next action for a development agent
+Typed models and schema fixtures (`tests/schemas/`), JSON errors and exit codes (CLI.md), USB discovery, identity confidence, explicit selection, permission and busy diagnostics, full snapshot including lighting, text and PNG views from firmware geometry, stateful emulator with generic and split layouts. All read paths run behind a default-deny transport gate that refuses write packets.
 
-Implementation is paused at the owner’s request while specifications are refined. The README origin note is now entirely lowercase without quotation marks; SPEC.md and AGENTS.md reflect this requirement. Verification: the paragraph matches its previous wording converted to lowercase, and `git diff --check` passes. Continue specification review with the owner before starting M0.
+### M2: proposal, approval, write, recovery. Gate met.
 
-Read AGENTS.md, SPEC.md, PLAN.md and UPSTREAM.md. Implement M0: establish a small headless adapter around pinned Vial GUI logic with modern packaging feasibility checks. Do not rewrite the protocol, implement a GUI, or treat old web build scripts as the Python product build. Update this file with actual commands/outcomes and the next incomplete task.
+Immutable content-addressed proposals, baseline checks, per-device OS locks, durable pre-write backup, journaling, read-back, attestation scoped to proposal and device, guided physical unlock with relock, one automatic previous state, undo, bounded automatic restore, restart recovery, fault injection.
 
-## Unresolved engineering work (not more product-interview questions)
+- Writable operations are `set_key` and `set_encoder` only. Other families are read and backed up; M3 adds writing them. Undo refuses (`restore_unsupported`) if one of them differs. Recovery leaves them as they are and says so, because refusing would lock the keyboard out of all further plans.
+- Hardware: the gate's one approved Corne change, read-back and undo passed on 2026-10-31. See "Evidence". The other guarantees in this milestone are emulator-tested only.
 
-- Choose tested Python/dependency versions and target OS minimums.
-- Measure headless extraction scope and validate HID backend packaging.
-- Define machine-readable schemas/tool signatures/exit-code map per accepted semantic contracts.
-- Implement all runtime behavior and emulator.
-- Obtain native macOS Apple Silicon and Corne hardware verification when needed. Missing hardware is a verification limitation, not permission to claim passing results.
-- Implement release installer/update/Homebrew path and decide signing/notarization on evidence.
+M3 to M7 have not started.
 
-The owner explicitly requested the initial documentation push. The destination was checked and had no advertised refs before publication. Future releases and pushes still require the corresponding user instruction.
+## Evidence
+
+Hardware: owner's Corne, `foostan Corne` 0x4653:0x0001, VIA protocol 9, Vial protocol 6, on Linux x86_64 with the existing udev rule. Read-only, from source and from the packaged binary: `doctor`, `devices list`, `device inspect`, `snapshot`, `view` (text and PNG, including rotated thumb keys), `plan` (validation against the real keymap, proposal stored in a scratch directory), `apply` without approval (refused). Three consecutive snapshots gave identical fingerprints, so stale checks should not misfire on it. Macro contents were never printed.
+
+Hardware write, run by the owner on 2026-10-31 from source on the same Corne: `plan --set '1:6,2=KC_F13'`, `view --proposal`, `apply --user-approved` (outcome `verified`), `view` (F13 shown), `undo plan`, `apply --user-approved` (outcome `verified`), `view` (back to `XXX`). An extra `view --layer 0` between plan and apply did not invalidate the proposal. A read-only check afterward found the key back at `KC_NO`, the keyboard locked, `previous.json` holding `KC_F13` as the only one of 168 keymap entries differing from the keyboard (so the undo itself is revertible), and no `pending.json`, `recovery.json` or leftover proposals. `previous.json` and its directory were modes 600 and 700. The test checks firmware read-back; pressing the key on the host and persistence across a replug were not exercised. The raw terminal transcript is archived at `.easter_egg/first-run.txt`.
+
+| Check | Command | Outcome |
+| --- | --- | --- |
+| Test suite, Python 3.14.8 | `.venv/bin/python -m pytest` | 228 passed |
+| Test suite, Python 3.12.16, non-editable install | same | 228 passed |
+| Upstream's own tests, unchanged, headless | part of the suite (`vendor/vial/upstream/test`) | pass; `test_gui.py` needs Qt and is not vendored |
+| Vendored files match the manifest and the pinned clone | `tests/test_vendor.py` | pass |
+| All 65,536 keycodes round-trip on protocols 5 and 6 | one-off script; the suite keeps a sampled version | 0 losses |
+| Package with no Python and an empty environment | `env -i dist/vialtic/vialtic ...` | version, composite-keycode plan, apply, undo, PNG on the emulator, and read-only discovery on the Corne all work |
+| Fault sweep at every state-file and packet site (crash, interrupt, disk full) over change, undo, QK_BOOT and recovery | one-off script from the independent review | no lost backups, no writes on restart, no false success. Remaining flags: process death while unlocked, which recovery relocks and reads warn about, and a checker invariant that does not apply to recovery |
+
+An independent review of the write path, run against the emulator only, found 12 real bugs that the first test suite missed. All are fixed with regression tests at the end of `tests/test_write_core.py`. The most serious: automatic restore could overwrite an identical second keyboard and then delete the backup; a proposal could be written to an identical unit; a proposal file copied over another id could execute under that id's approval; a crash could lock a keyboard out of every further plan; an interrupt after verification could roll back a good write; and the packaged binary collected the old `src/simpleeval.py` from the web tree, which a guard in `packaging/vialtic.spec` now refuses.
+
+Emulator-tested only, not verified on hardware: failure recovery and automatic restore, stale refusal, physical unlock and relock, encoders, layout options, and identical-unit handling. Hardware writes from the packaged binary have not been run either (it was only read-only on the Corne). The Corne reports no encoders, lighting, combos or QMK settings, so those need other hardware. Not verified anywhere: anything on macOS, packaged builds on other Linux distributions, the CI workflow.
+
+## Decisions
+
+- Emulator answers the wire protocol below upstream's `Keyboard` instead of extending `DummyKeyboard`, so codecs, the gate and transport failures are exercised. Rationale in UPSTREAM.md.
+- `apply --user-approved` is the attestation flag. It cannot prove consent; documented in CLI.md.
+- Stale checks cover every family except lighting, which lighting keys on the keyboard can change at any moment. Lighting differences during undo are warnings.
+- `snapshot` leaves out macro contents unless `--include-macros` is given. Backups keep them, owner-only.
+- Unknown QMK settings produce a warning and do not block keymap writes, since this build cannot write settings. Revisit when M3 makes them writable (SPEC 7).
+- Identical units: writing after a path change needs an explicit `--device`, automatic restore stops unless the path matches and the values are explained, and backups are per identity. Corne firmware falls in this category.
+- Dependencies: Python 3.12 or newer, `hidapi` 0.15 (ships `hidraw` for Linux, replacing upstream's fork), Pillow, pydantic, `simpleeval`. Exact versions and hashes are in `requirements.lock`, compiled with `uv pip compile --universal`.
+
+## Next action
+
+Implement M3 from PLAN.md: the capability matrix and writing for the remaining families through the same pipeline, starting by extending `RESTORABLE_FAMILIES` and `WRITABLE_OPERATIONS` in `src/vialtic/vial_adapter.py`. First, record the result of the first CI run here, since it is what can close the M0 macOS item. Further pushes, tags and releases need the owner's request.
+
+## Unresolved engineering work
+
+- Run CI, fix the Linux glibc and macOS baselines from its evidence, and verify native HID on macOS.
+- Implement M3 to M7, including `profile`, `import`, `export`, `mcp serve` and `update`.
+- Obtain macOS Apple Silicon hardware evidence when needed. Missing hardware is a verification limitation, not permission to claim passing results.
+- Decide signing and notarization on evidence.

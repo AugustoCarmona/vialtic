@@ -1,0 +1,117 @@
+{
+  "$defs": {
+    "SetEncoderChange": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "title": "Direction",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "keycode": {
+          "title": "Keycode",
+          "type": "string"
+        },
+        "layer": {
+          "title": "Layer",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_encoder",
+          "default": "set_encoder",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "index",
+        "direction",
+        "keycode"
+      ],
+      "title": "SetEncoderChange",
+      "type": "object"
+    },
+    "SetKeyChange": {
+      "additionalProperties": false,
+      "properties": {
+        "col": {
+          "title": "Col",
+          "type": "integer"
+        },
+        "keycode": {
+          "title": "Keycode",
+          "type": "string"
+        },
+        "layer": {
+          "title": "Layer",
+          "type": "integer"
+        },
+        "row": {
+          "title": "Row",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_key",
+          "default": "set_key",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "row",
+        "col",
+        "keycode"
+      ],
+      "title": "SetKeyChange",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "changes": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "set_encoder": "#/$defs/SetEncoderChange",
+            "set_key": "#/$defs/SetKeyChange"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/SetKeyChange"
+          },
+          {
+            "$ref": "#/$defs/SetEncoderChange"
+          }
+        ]
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "title": "Changes",
+      "type": "array"
+    },
+    "kind": {
+      "const": "change_set",
+      "default": "change_set",
+      "title": "Kind",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "changes"
+  ],
+  "title": "ChangeSet",
+  "type": "object"
+}

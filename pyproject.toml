@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vialtic"
+version = "0.1.0.dev0"
+description = "Vial-based agentic software for configuring your keyboard."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "GPL-2.0-or-later"
+license-files = ["COPYING"]
+authors = [{ name = "Augusto Carmona" }]
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "hidapi>=0.15,<0.16",
+    "pillow>=12,<14",
+    "pydantic>=2.11,<3",
+    "simpleeval>=1.0.3,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9,<10",
+    "pyinstaller>=6.16,<7",
+]
+
+[project.scripts]
+vialtic = "vialtic.cli:main"
+
+[project.urls]
+Repository = "https://github.com/AugustoCarmona/vialtic"
+
+[tool.hatch.build]
+# The repository root also holds the unmodified Vial Web sources.
+include = ["src/vialtic/**", "vendor/vial/**"]
+exclude = ["vendor/vial/upstream/test/**"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vialtic"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"vendor/vial" = "vialtic/_vendor/vial"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "vendor/vial/upstream/test"]
+addopts = "-q"
