@@ -81,7 +81,8 @@ CHECKED_FAMILIES = [
     "key_overrides", "alt_repeat_keys", "settings",
 ]
 ALL_FAMILIES = CHECKED_FAMILIES + ["lighting"]
-RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options", "tap_dance", "combos", "key_overrides", "alt_repeat_keys"}
+RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options", "tap_dance", "combos", "key_overrides", "alt_repeat_keys",
+                       "settings"}
 
 
 class HeadlessKeyboard(Keyboard):
@@ -404,7 +405,8 @@ def writable_operations(kb: Keyboard) -> list[str]:
     """Operations this keyboard can take; a family it lacks is not offered."""
     available = {"set_key": True, "set_encoder": bool(kb.encoder_count), "set_layout_option": bool(kb.layout_labels),
                  "set_tap_dance": bool(kb.tap_dance_count), "set_combo": bool(kb.combo_count),
-                 "set_key_override": bool(kb.key_override_count), "set_alt_repeat_key": bool(kb.alt_repeat_key_count)}
+                 "set_key_override": bool(kb.key_override_count), "set_alt_repeat_key": bool(kb.alt_repeat_key_count),
+                 "set_qmk_setting": bool(set(kb.settings))}
     return [name for name, present in available.items() if present]
 
 
@@ -452,10 +454,36 @@ def read_configuration(kb: Keyboard) -> Configuration:
         keymap=keymap, encoders=encoders, layout_options=kb.layout_options, macros=macros,
         tap_dance=[list(e) for e in kb.save_tap_dance()], combos=[list(e) for e in kb.save_combo()],
         key_overrides=kb.save_key_override(), alt_repeat_keys=kb.save_alt_repeat_key(),
-        settings=SettingsState(values={str(k): v for k, v in sorted(kb.settings.items())},
-                               unknown_qsids=sorted(q for q in kb.supported_settings
-                                                    if not QmkSettings.is_qsid_supported(q))),
+        settings=_read_settings(kb),
         lighting=lighting)
+
+
+def _read_settings(kb: Keyboard) -> SettingsState:
+    unknown = sorted(q for q in kb.supported_settings if not QmkSettings.is_qsid_supported(q))
+    raw = {}
+    for qsid in unknown:
+        data = kb.usb_send(kb.dev, struct.pack("<BBH", proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_QMK_SETTINGS_GET, qsid),
+                           retries=20)
+        if data[0] == 0:
+            raw[str(qsid)] = bytes(data[1:]).hex()
+    return SettingsState(values={str(k): v for k, v in sorted(kb.settings.items())}, unknown_qsids=unknown,
+                         unreadable_qsids=sorted(q for q in kb.supported_settings
+                                                 if QmkSettings.is_qsid_supported(q) and q not in kb.settings),
+                         unknown_raw=raw)
+
+
+def setting_fields(qsid: int) -> list[dict]:
+    return QmkSettings.qsid_fields[qsid]
+
+
+def setting_change_title(qsid: int, before: int, after: int) -> str:
+    """Name what changes, using the pinned table's own titles."""
+    fields = setting_fields(qsid)
+    if fields[0]["type"] == "integer":
+        return fields[0]["title"]
+    changed = before ^ after
+    names = [f["title"] for f in fields if changed & (1 << f.get("bit", 0))]
+    return "; ".join(names) or fields[0]["title"]
 
 
 def coverage_of(kb: Keyboard, config: Configuration) -> dict[str, str]:
@@ -473,6 +501,7 @@ def coverage_of(kb: Keyboard, config: Configuration) -> dict[str, str]:
         "key_overrides": present(kb.key_override_count),
         "alt_repeat_keys": present(kb.alt_repeat_key_count),
         "settings": ("partial_unknown_qsids" if config.settings.unknown_qsids
+                     else "partial_unreadable_qsids" if config.settings.unreadable_qsids
                      else present(len(kb.supported_settings))),
         "lighting": present(0 if lighting_kind(kb) == "none" else 1),
     }
@@ -568,6 +597,10 @@ def write_operation(kb: Keyboard, op) -> None:
         kb.key_override_set(op.index, _key_override_entry(op.after))
     elif op.type == "set_alt_repeat_key":
         kb.alt_repeat_key_set(op.index, _alt_repeat_entry(op.after))
+    elif op.type == "set_qmk_setting":
+        status = kb.qmk_settings_set(op.qsid, op.after)
+        if status != 0:
+            raise RuntimeError(f"the firmware refused QMK setting {op.qsid} (status {status})")
     else:
         raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 

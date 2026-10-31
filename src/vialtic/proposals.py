@@ -11,7 +11,8 @@ from .device import Session, canonical_json
 from .errors import VialticError
 from .models import (
     AltRepeatKeyValue, Baseline, Change, ComboValue, Configuration, KeyOverrideValue, SetAltRepeatKeyChange,
-    SetAltRepeatKeyOperation, SetComboChange, SetComboOperation, SetKeyOverrideChange, SetKeyOverrideOperation, TapDanceValue, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
+    SetAltRepeatKeyOperation, SetComboChange, SetComboOperation, SetKeyOverrideChange, SetKeyOverrideOperation, SetQmkSettingChange, SetQmkSettingOperation,
+    TapDanceValue, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
     ProposalType, ProposalUnlock, SetEncoderChange, SetEncoderOperation, SetKeyChange, SetKeyOperation,
     SetLayoutOptionChange, SetLayoutOptionsOperation, SetTapDanceChange, SetTapDanceOperation, Snapshot, UnlockPosition,
     VerificationDifference,
@@ -30,7 +31,7 @@ RECOVERY_TEXT = ("Everything Vialtic can read from the keyboard is saved before 
 
 FAMILY_OF_OPERATION = {"set_key": "keymap", "set_encoder": "encoders", "set_layout_options": "layout_options",
                        "set_tap_dance": "tap_dance", "set_combo": "combos", "set_key_override": "key_overrides",
-                       "set_alt_repeat_key": "alt_repeat_keys"}
+                       "set_alt_repeat_key": "alt_repeat_keys", "set_qmk_setting": "settings"}
 U8 = 0xFF
 U16 = 0xFFFF
 
@@ -78,6 +79,7 @@ class _Planner:
         self.quiet = quiet
         self.seen: set[tuple] = set()
         self.layout_value: int | None = None
+        self.settings_after: dict[int, int] = {}
 
     def _once(self, target: tuple, description: str) -> None:
         if target in self.seen:
@@ -232,7 +234,60 @@ class _Planner:
             return self._skip(f"alternate repeat {change.index}")
         self.operations.append(SetAltRepeatKeyOperation(index=change.index, before=before, after=after))
 
+    def _set_qmk_setting(self, change: SetQmkSettingChange) -> None:
+        qsid = change.qsid
+        _capability(self.kb.supported_settings, "settings", "QMK settings")
+        if qsid not in self.kb.supported_settings:
+            raise VialticError("capability_unavailable", f"This keyboard's firmware does not expose QMK setting {qsid}.",
+                               details={"family": "settings", "qsid": qsid})
+        if qsid in self.config.settings.unknown_qsids:
+            raise VialticError("unsupported_operation", f"QMK setting {qsid} is not in the pinned Vial tables, so its width "
+                                                        "and meaning are unknown. Vialtic will not write it.",
+                               details={"qsid": qsid})
+        current = self.config.settings.values.get(str(qsid))
+        if current is None:
+            raise VialticError("unsupported_operation", f"The firmware refused to report QMK setting {qsid}, so a change "
+                                                        "could not be backed up. Vialtic will not write it.",
+                               details={"qsid": qsid})
+        fields = va.setting_fields(qsid)
+        by_bit = change.bit is not None or change.enabled is not None
+        if by_bit == (change.value is not None) or (by_bit and (change.bit is None or change.enabled is None)):
+            raise VialticError("invalid_request", f"QMK setting {qsid}: give either value, or both bit and enabled.")
+        self._once(("setting", qsid, change.bit), f"QMK setting {qsid}" + ("" if change.bit is None else f" bit {change.bit}"))
+        if ("setting", qsid, None) in self.seen and by_bit or (not by_bit and qsid in self.settings_after):
+            raise VialticError("invalid_request", f"The request changes QMK setting {qsid} more than once.")
+        value = self.settings_after.get(qsid, current)
+        if fields[0]["type"] == "integer":
+            if by_bit:
+                raise VialticError("invalid_request", f"QMK setting {qsid} ({fields[0]['title']}) is a number, not flags.")
+            if isinstance(change.value, bool) or not fields[0]["min"] <= change.value <= fields[0]["max"]:
+                raise VialticError("invalid_request", f"QMK setting {qsid} ({fields[0]['title']}) must be between "
+                                                      f"{fields[0]['min']} and {fields[0]['max']}, not {change.value}.")
+            value = change.value
+        else:
+            known = sum(1 << f.get("bit", 0) for f in fields)
+            if by_bit:
+                if not 0 <= change.bit < 32 or not known >> change.bit & 1:
+                    raise VialticError("invalid_request", f"QMK setting {qsid} has no flag at bit {change.bit}.")
+                value = value | (1 << change.bit) if change.enabled else value & ~(1 << change.bit)
+            else:
+                width = fields[0].get("width", 1)
+                if isinstance(change.value, bool) or not 0 <= change.value < 1 << (8 * width):
+                    raise VialticError("invalid_request", f"QMK setting {qsid} must fit in {width} byte(s), not {change.value}.")
+                if (change.value ^ current) & ~known:
+                    raise VialticError("invalid_request", f"QMK setting {qsid}: the value changes bits Vial does not define "
+                                                          f"(known mask 0x{known:x}).")
+                value = change.value
+        self.settings_after[qsid] = value
+
     def finish(self) -> tuple[list[Operation], list[str]]:
+        for qsid, value in self.settings_after.items():
+            before_value = self.config.settings.values[str(qsid)]
+            if value == before_value:
+                self._skip(f"QMK setting {qsid}")
+            else:
+                self.operations.append(SetQmkSettingOperation(qsid=qsid, title=va.setting_change_title(qsid, before_value, value),
+                                                              before=before_value, after=value))
         before = self.config.layout_options
         if self.layout_value is not None:
             if self.layout_value == before:
@@ -267,6 +322,8 @@ def describe_operation(op: Operation) -> str:
     if op.type == "set_combo":
         keys = [key.keycode for key in op.before.keys], [key.keycode for key in op.after.keys]
         return f"combo {op.index}: {keys[0]} => {op.before.output.keycode} -> {keys[1]} => {op.after.output.keycode}"
+    if op.type == "set_qmk_setting":
+        return f"QMK setting {op.qsid} ({op.title}): {op.before} -> {op.after}"
     if op.type == "set_key_override":
         return f"key override {op.index}: {_changed_fields(op.before, op.after)}"
     if op.type == "set_alt_repeat_key":
@@ -296,6 +353,7 @@ def family_state(config: Configuration) -> dict[str, dict[str, Any]]:
         "combos": {str(i): list(e) for i, e in enumerate(config.combos)},
         "key_overrides": {str(i): dict(e) for i, e in enumerate(config.key_overrides)},
         "alt_repeat_keys": {str(i): dict(e) for i, e in enumerate(config.alt_repeat_keys)},
+        "settings": dict(config.settings.values),
     }
 
 
@@ -315,6 +373,8 @@ def operation_effect(op: Operation) -> tuple[str, str, Any, Any]:
         return "key_overrides", str(op.index), va.key_override_wire(op.before), va.key_override_wire(op.after)
     if op.type == "set_alt_repeat_key":
         return "alt_repeat_keys", str(op.index), va.alt_repeat_wire(op.before), va.alt_repeat_wire(op.after)
+    if op.type == "set_qmk_setting":
+        return "settings", str(op.qsid), op.before, op.after
     raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 
 
@@ -366,10 +426,21 @@ def restore_operations(current: Configuration, target: Configuration) -> tuple[l
                 ops.append(SetAltRepeatKeyOperation(index=index, before=va.alt_repeat_value(have_alt),
                                                     after=va.alt_repeat_value(want_alt)))
 
+    if "settings" not in blockers:
+        for key, wanted in target.settings.values.items():
+            if current.settings.values[key] != wanted:
+                qsid = int(key)
+                title = va.setting_change_title(qsid, current.settings.values[key], wanted)
+                ops.append(SetQmkSettingOperation(qsid=qsid, title=title, before=current.settings.values[key], after=wanted))
+
     now_data, target_data = current.model_dump(mode="json"), target.model_dump(mode="json")
     blockers += [f for f in va.CHECKED_FAMILIES
                  if f not in va.RESTORABLE_FAMILIES and f not in blockers and now_data[f] != target_data[f]]
     notes = []
+    moved = [key for key, raw in target.settings.unknown_raw.items() if current.settings.unknown_raw.get(key) not in (None, raw)]
+    if moved:
+        notes.append(f"QMK settings {moved} are not in the pinned Vial tables and changed since the backup. Vialtic cannot "
+                     "restore them; use the software that changed them.")
     if now_data["lighting"] != target_data["lighting"]:
         notes.append("Lighting differs from the saved state and will not be restored: this build cannot write lighting yet.")
     return ops, blockers, notes

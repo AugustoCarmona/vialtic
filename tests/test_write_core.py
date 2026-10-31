@@ -1142,7 +1142,7 @@ def test_proposal_lists_what_the_backup_cannot_hold(make_rig):
     snapshot = rig.service.read_snapshot()
     assert snapshot.coverage["settings"] == "partial_unknown_qsids"
     proposal = rig.plan((1, 0, 2, "KC_A"))
-    assert any("60000" in w and "not read or backed up" in w for w in proposal.warnings)
+    assert any("60000" in w and "never writes" in w for w in proposal.warnings)
     assert "Everything Vialtic can read" in proposal.recovery and "full configuration" not in proposal.recovery
 
 

@@ -480,6 +480,41 @@
       "title": "SetLayoutOptionsOperation",
       "type": "object"
     },
+    "SetQmkSettingOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "title": "After",
+          "type": "integer"
+        },
+        "before": {
+          "title": "Before",
+          "type": "integer"
+        },
+        "qsid": {
+          "title": "Qsid",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "set_qmk_setting",
+          "default": "set_qmk_setting",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "qsid",
+        "title",
+        "before",
+        "after"
+      ],
+      "title": "SetQmkSettingOperation",
+      "type": "object"
+    },
     "SetTapDanceOperation": {
       "additionalProperties": false,
       "properties": {
@@ -603,6 +638,7 @@
             "set_key": "#/$defs/SetKeyOperation",
             "set_key_override": "#/$defs/SetKeyOverrideOperation",
             "set_layout_options": "#/$defs/SetLayoutOptionsOperation",
+            "set_qmk_setting": "#/$defs/SetQmkSettingOperation",
             "set_tap_dance": "#/$defs/SetTapDanceOperation"
           },
           "propertyName": "type"
@@ -628,6 +664,9 @@
           },
           {
             "$ref": "#/$defs/SetAltRepeatKeyOperation"
+          },
+          {
+            "$ref": "#/$defs/SetQmkSettingOperation"
           }
         ]
       },

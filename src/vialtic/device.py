@@ -266,7 +266,11 @@ class Session:
         warnings = []
         if config.settings.unknown_qsids:
             warnings.append(f"QMK settings {config.settings.unknown_qsids} are exposed by the firmware but unknown to "
-                            "the pinned Vial tables; they are not read or backed up.")
+                            "the pinned Vial tables. Their raw answers are kept with the backup, but Vialtic never writes "
+                            "them, so it cannot restore them if something else changes them.")
+        if config.settings.unreadable_qsids:
+            warnings.append(f"The firmware refused to report QMK settings {config.settings.unreadable_qsids}, so they are "
+                            "not backed up and cannot be changed.")
         return Snapshot(
             created_at=now or datetime.now(timezone.utc), device=self.identity,
             capabilities=va.capabilities_of(self.kb), layout=va.layout_of(self.kb), configuration=config,
@@ -275,6 +279,8 @@ class Session:
 
 def family_fingerprints(config) -> dict[str, str]:
     data = config.model_dump(mode="json")
+    # Opaque answers of unknown width may carry bytes that are not part of the value.
+    data["settings"].pop("unknown_raw", None)
     return {family: sha256_json(data[family]) for family in va.ALL_FAMILIES}
 
 

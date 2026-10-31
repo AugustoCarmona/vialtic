@@ -308,8 +308,18 @@ class SetAltRepeatKeyChange(Model):
     options: int | None = None
 
 
+class SetQmkSettingChange(Model):
+    """Change one QMK setting: either the whole `value`, or one flag with `bit` and `enabled`."""
+
+    type: Literal["set_qmk_setting"] = "set_qmk_setting"
+    qsid: int
+    value: int | None = None
+    bit: int | None = None
+    enabled: bool | None = None
+
+
 Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange, SetTapDanceChange, SetComboChange,
-                         SetKeyOverrideChange, SetAltRepeatKeyChange], Field(discriminator="type")]
+                         SetKeyOverrideChange, SetAltRepeatKeyChange, SetQmkSettingChange], Field(discriminator="type")]
 
 
 class ChangeSet(Envelope):
@@ -403,8 +413,16 @@ class SetAltRepeatKeyOperation(Model):
     after: AltRepeatKeyValue
 
 
+class SetQmkSettingOperation(Model):
+    type: Literal["set_qmk_setting"] = "set_qmk_setting"
+    qsid: int
+    title: str
+    before: int
+    after: int
+
+
 Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation, SetLayoutOptionsOperation, SetTapDanceOperation,
-                            SetComboOperation, SetKeyOverrideOperation, SetAltRepeatKeyOperation],
+                            SetComboOperation, SetKeyOverrideOperation, SetAltRepeatKeyOperation, SetQmkSettingOperation],
                       Field(discriminator="type")]
 
 

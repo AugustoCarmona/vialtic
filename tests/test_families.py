@@ -11,7 +11,7 @@ from vialtic.emulator import Faults
 from vialtic.errors import VialticError
 from vialtic.models import (
     ChangeSet, SetAltRepeatKeyChange, SetComboChange, SetKeyChange, SetKeyOverrideChange, SetLayoutOptionChange,
-    SetTapDanceChange,
+    SetQmkSettingChange, SetTapDanceChange,
 )
 from vialtic.service import attestation_for
 
@@ -334,3 +334,117 @@ def test_alt_repeat_boot_needs_unlock(tmp_path, field):
     proposal = plan(rig, SetAltRepeatKeyChange(index=0, **{field: "QK_BOOT"}))
     assert proposal.unlock.required and rig.apply(proposal).outcome == "verified"
     assert rig.service.read_snapshot().configuration.alt_repeat_keys[0][field] == "QK_BOOT"
+
+
+# QMK settings.
+
+def _setting(rig, qsid):
+    return firmware(rig).state["settings"][str(qsid)]
+
+
+def test_setting_cycle(tmp_path):
+    rig = full(tmp_path)
+    proposal = plan(rig, SetQmkSettingChange(qsid=7, value=175))
+    assert proposals.describe_operation(proposal.operations[0]) == "QMK setting 7 (Tapping Term): 0 -> 175"
+    check_family_cycle(rig, proposal, lambda: _setting(rig, 7), "settings")
+
+
+@pytest.mark.parametrize("qsid, value", [(20, 100), (7, 10000), (21, 0x3FF)])
+def test_setting_widths_reach_the_firmware(tmp_path, qsid, value):
+    """One, two and four byte settings, at their largest values."""
+    rig = full(tmp_path)
+    assert rig.apply(plan(rig, SetQmkSettingChange(qsid=qsid, value=value))).outcome == "verified"
+    assert _setting(rig, qsid) == value
+
+
+def test_setting_flags_merge_and_keep_other_bits(tmp_path):
+    rig = full(tmp_path)
+    firmware(rig).state["settings"]["21"] = 0x40000001  # bit 30 is not in the table
+    proposal = plan(rig, SetQmkSettingChange(qsid=21, bit=7, enabled=True), SetQmkSettingChange(qsid=21, bit=0, enabled=False))
+    assert len(proposal.operations) == 1 and proposal.operations[0].after == 0x40000080
+    assert "Swap Caps Lock and Left Control" in proposal.operations[0].title and "N-key" in proposal.operations[0].title
+    assert rig.apply(proposal).outcome == "verified" and _setting(rig, 21) == 0x40000080
+
+
+def test_setting_plain_boolean(tmp_path):
+    rig = full(tmp_path)
+    assert rig.apply(plan(rig, SetQmkSettingChange(qsid=22, bit=0, enabled=True))).outcome == "verified"
+    assert _setting(rig, 22) == 1
+
+
+@pytest.mark.parametrize("change, code", [
+    (dict(qsid=7, value=10001), "invalid_request"), (dict(qsid=7, value=-1), "invalid_request"),
+    (dict(qsid=20, value=101), "invalid_request"), (dict(qsid=7, bit=0, enabled=True), "invalid_request"),
+    (dict(qsid=21, bit=10, enabled=True), "invalid_request"), (dict(qsid=21, bit=40, enabled=True), "invalid_request"),
+    (dict(qsid=21, value=0x400), "invalid_request"), (dict(qsid=21, value=1 << 32), "invalid_request"),
+    (dict(qsid=8, value=256), "invalid_request"), (dict(qsid=22, value=2), "invalid_request"),
+    (dict(qsid=7), "invalid_request"), (dict(qsid=7, value=1, bit=0, enabled=True), "invalid_request"),
+    (dict(qsid=21, bit=1), "invalid_request"), (dict(qsid=21, enabled=True), "invalid_request"),
+    (dict(qsid=999, value=1), "capability_unavailable"),
+])
+def test_setting_bounds(tmp_path, change, code):
+    refused(full(tmp_path), code, SetQmkSettingChange(**change))
+
+
+def test_setting_twice_is_refused(tmp_path):
+    rig = full(tmp_path)
+    refused(rig, "invalid_request", SetQmkSettingChange(qsid=7, value=1), SetQmkSettingChange(qsid=7, value=2))
+    refused(rig, "invalid_request", SetQmkSettingChange(qsid=21, bit=1, enabled=True), SetQmkSettingChange(qsid=21, bit=1, enabled=False))
+    refused(rig, "invalid_request", SetQmkSettingChange(qsid=21, bit=1, enabled=True), SetQmkSettingChange(qsid=21, value=0))
+    refused(rig, "invalid_request", SetQmkSettingChange(qsid=21, value=0), SetQmkSettingChange(qsid=21, bit=1, enabled=True))
+
+
+def test_setting_without_capability(tmp_path):
+    assert refused(Rig(tmp_path, "minimal"), "capability_unavailable", SetQmkSettingChange(qsid=7, value=1)).details["family"] == "settings"
+    assert refused(Rig(tmp_path / "v", "vintage"), "capability_unavailable", SetQmkSettingChange(qsid=7, value=1)).details["family"] == "settings"
+
+
+def test_firmware_status_byte_fails_the_write(tmp_path):
+    rig = full(tmp_path, Faults(settings_status_fail=(7,)))
+    proposal = plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z"), SetQmkSettingChange(qsid=7, value=175))
+    result = rig.apply(proposal)
+    assert result.outcome == "failed_restored" and "status 1" in result.message
+    assert _setting(rig, 7) == 0 and rig.keycode(0, 0, 0) == 0x04
+
+
+def _with_unknown_setting(rig, qsid=60000):
+    fw = firmware(rig)
+    fw.state["settings"][str(qsid)] = 0x1234
+
+
+def test_unknown_setting_is_kept_opaque_and_never_written(tmp_path):
+    rig = Rig(tmp_path, "split")
+    _with_unknown_setting(rig)
+    snapshot = rig.service.read_snapshot()
+    assert snapshot.configuration.settings.unknown_qsids == [60000]
+    assert snapshot.configuration.settings.unknown_raw["60000"].startswith("34120000")
+    assert snapshot.coverage["settings"] == "partial_unknown_qsids"
+    assert refused(rig, "unsupported_operation", SetQmkSettingChange(qsid=60000, value=1)).details["qsid"] == 60000
+
+
+def test_unknown_setting_does_not_block_other_writes_and_undo_says_what_it_cannot_do(tmp_path):
+    rig = Rig(tmp_path, "split")
+    _with_unknown_setting(rig)
+    assert rig.apply(rig.plan((1, 0, 2, "KC_A"))).outcome == "verified"
+    firmware(rig).state["settings"]["60000"] = 0x4321
+    undo_plan = rig.service.create_undo_proposal(None)
+    assert any("60000" in w and "cannot restore" in w for w in undo_plan.warnings)
+    assert rig.apply(undo_plan).outcome == "verified"
+    assert firmware(rig).state["settings"]["60000"] == 0x4321, "left alone, as the proposal said"
+
+
+def test_unstable_unknown_answer_does_not_make_proposals_stale(tmp_path):
+    rig = Rig(tmp_path, "split")
+    _with_unknown_setting(rig)
+    proposal = rig.plan((1, 0, 2, "KC_A"))
+    firmware(rig).state["settings"]["60000"] = 0x9999
+    assert rig.apply(proposal).outcome == "verified"
+
+
+def test_unreadable_setting_is_reported_and_refused(tmp_path):
+    rig = full(tmp_path, Faults(settings_get_fail=(7,)))
+    snapshot = rig.service.read_snapshot()
+    assert snapshot.configuration.settings.unreadable_qsids == [7]
+    assert snapshot.coverage["settings"] == "partial_unreadable_qsids"
+    assert any("refused to report" in w for w in snapshot.warnings)
+    assert refused(rig, "unsupported_operation", SetQmkSettingChange(qsid=7, value=1)).details["qsid"] == 7
