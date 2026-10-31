@@ -1,6 +1,6 @@
 # CLI contract
 
-This documents the commands that exist today. Run `vialtic <command> --help` for all options. The planned command families in SPEC.md that are missing here (`profile`, `import`, `export`, `mcp serve`, `update`) are not implemented yet. Feature coverage is in [`CAPABILITIES.md`](CAPABILITIES.md).
+This documents the commands that exist today. Run `vialtic <command> --help` for all options. The planned command families in SPEC.md that are missing here (`mcp serve`, `update`) are not implemented yet. Feature coverage is in [`CAPABILITIES.md`](CAPABILITIES.md).
 
 ## Conventions
 
@@ -26,6 +26,12 @@ Success: `{"schema_version": 1, "ok": true, "result": {...}}`. Failure: `{"schem
 | `undo plan`, `recover plan` | no | Propose restoring the previous state or the state before an interrupted write. |
 | `unlock status`, `unlock poll` | no configuration | Lock state and progress. |
 | `unlock start ID --user-approved`, `lock` | no configuration | Physical unlock for an approved proposal that needs it; locking. |
+| `profile list`, `profile show NAME [--include-macros]` | no | Saved profiles. |
+| `profile save NAME [--overwrite]` | no | Store the complete configuration under a name. |
+| `profile delete NAME` | no | Delete a saved profile. It cannot be recovered. |
+| `profile plan NAME [--lighting save\|transient\|skip]` | no | Propose applying a profile, as an ordinary proposal. |
+| `import FILE --name NAME [--overwrite] [--offline]` | no | Validate a `.vil` or Vialtic file and store it as a profile. |
+| `export --output FILE [--format vialtic\|vil] [--profile NAME] [--include-macros] [--overwrite]` | no | Write the keyboard's configuration or a profile to an owner-only file. |
 | `emulator list`, `emulator reset --emulator NAME` | no | Development emulator scenarios and state. |
 
 Every family in [`CAPABILITIES.md`](CAPABILITIES.md) is writable when the firmware exposes it. `device inspect` lists what a keyboard takes under `writable_operations`. A request for something it lacks is refused with `capability_unavailable`. Physical unlock is declared in the proposal for every macro write and for anything that writes `QK_BOOT`.
@@ -66,6 +72,27 @@ Macro text can hold anything a person typed, so contents stay out of default out
 
 Keycodes use Vial/QMK names (`KC_A`, `MO(1)`, `LT(2, KC_SPC)`, `LGUI(KC_3)`, `LSFT_T(KC_F)`) or a hex value for unnamed custom codes. Input is parsed by a strict grammar; anything else is refused, never mapped to `KC_NO` as upstream's own decoder does. Arguments that do not fit, such as `LT(1, LCTL(KC_A))` or `LSFT(MO(1))`, are refused rather than masked. Change files are strictly typed: `true` is not a number and `"0"` is not a layer.
 
+## Profiles and interchange
+
+Profiles live under `$XDG_DATA_HOME/vialtic/profiles`, or `~/.local/share/vialtic/profiles`, as owner-only JSON. They persist until deleted and are separate from the one automatic previous configuration. Emulator profiles live apart, under `emulator/<scenario>/profiles`.
+
+Nothing here writes to a keyboard. `profile plan` makes a normal proposal, with the same diff, approval, stale checks, backup, verification, undo and recovery as any other. Upstream's `restore_layout` is never used: files become typed changes, and every keycode goes through the strict grammar.
+
+| | Vialtic format | `.vil` |
+| --- | --- | --- |
+| Read by | Vialtic | Vial and Vialtic |
+| Lighting | yes | **no, and `export` says so** |
+| Macros | raw bytes, lossless | parsed; `export` lists any macro it cannot represent exactly |
+| Fields unknown to this version | refused and named | reported, kept with the profile, written back on export, never applied |
+
+**Macro contents** stay out of `profile show` and `export` unless you pass `--include-macros`. A file exported without them leaves macros alone when applied, and says so. `profile save` does keep them, because a profile is meant to restore them; the file is owner-only, like a backup.
+
+**Import treats every file as hostile.** Regular files only: symlinks, FIFOs and devices are refused without blocking. Limits apply to size (4 MiB), nesting, list lengths and keycode text. Duplicate keys, non-JSON numbers and booleans used as numbers are refused. Profile names cannot hold path separators. Nothing in a file is evaluated or executed.
+
+**Compatibility is checked, with no option to force it.** `import` checks against a connected keyboard unless you pass `--offline`, and `profile plan` always checks. A file must have the same firmware id and, when it says so, the same layout definition; exactly the same layers, matrix, keys and encoders; no more entries than the keyboard has; only settings it exposes; and layout options it defines. Raw values from a different keycode or macro generation are refused. Keycode names are checked against the keyboard. A list shorter than the keyboard's leaves the rest alone. To move settings to a different keyboard, write explicit changes with `plan --changes`.
+
+A Vial file holding a macro with bytes Vialtic's strict encoder refuses, such as non-ASCII text, is refused rather than having its bytes changed. Use the Vialtic format for such macros.
+
 ## The approval contract
 
 `apply` needs `--user-approved`, which states that the user explicitly approved this exact proposal. **The flag is an attestation by the caller. It cannot prove a person consented, and clients must uphold this contract:** show the proposal, wait for explicit approval, and only then pass the flag. New or changed operations need a new proposal. A proposal is single use, whatever the outcome of applying it, and expires after 30 minutes.
@@ -101,9 +128,9 @@ A replug locks the firmware, so a macro write or anything holding `QK_BOOT` that
 | 2 | Usage | `usage_error` |
 | 3 | Device selection | `no_device`, `device_not_found`, `device_selection_required`, `device_ambiguous` |
 | 4 | Permission | `permission_denied` |
-| 5 | Busy | `device_busy`, `lock_timeout` |
+| 5 | Busy | `device_busy`, `lock_timeout`, `unlock_in_progress` |
 | 6 | Unsupported | `unsupported_protocol`, `unsupported_operation`, `capability_unavailable`, `malformed_device_data`, `restore_unsupported`, `write_blocked`, `hid_backend_unavailable` |
-| 7 | Invalid request | `invalid_request`, `invalid_keycode`, `invalid_coordinate`, `invalid_layer_reference`, `no_changes`, `nothing_to_undo`, `nothing_to_recover`, `invalid_file`, `capacity_exceeded` |
+| 7 | Invalid request | `invalid_request`, `invalid_keycode`, `invalid_coordinate`, `invalid_layer_reference`, `no_changes`, `nothing_to_undo`, `nothing_to_recover`, `invalid_file`, `capacity_exceeded`, `profile_not_found`, `profile_exists`, `profile_incompatible`, `output_exists` |
 | 8 | Approval | `approval_required`, `unlock_required` |
 | 9 | Stale | `proposal_not_found`, `proposal_expired`, `proposal_stale`, `proposal_tampered`, `device_changed` |
 | 10 | Apply did not verify | outcome `failed_restored`, `partial` or `unknown` |
@@ -114,7 +141,7 @@ A replug locks the firmware, so a macro write or anything holding `QK_BOOT` that
 
 ## Local files
 
-Linux: `$XDG_STATE_HOME/vialtic`, falling back to `~/.local/state/vialtic`. macOS: `~/Library/Application Support/Vialtic/state`. Files are owner-only.
+Linux: `$XDG_STATE_HOME/vialtic`, falling back to `~/.local/state/vialtic`, with profiles under `$XDG_DATA_HOME/vialtic`. macOS: `~/Library/Application Support/Vialtic/state` and `.../data`. Files are owner-only.
 
 | Path | Purpose |
 | --- | --- |

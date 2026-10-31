@@ -21,6 +21,7 @@ from conftest import Rig
 from vialtic import proposals
 from vialtic.device import classify_packet
 from vialtic.errors import VialticError
+from vialtic.profiles import to_vil
 from vialtic.models import (
     ChangeSet, SetAltRepeatKeyChange, SetComboChange, SetEncoderChange, SetKeyChange, SetKeyOverrideChange,
     SetLayoutOptionChange, SetLightingChange, SetMacroChange, SetQmkSettingChange, SetTapDanceChange, Snapshot,
@@ -47,7 +48,7 @@ OPERATIONS = {
     "lighting_transient": SetLightingChange(system="vialrgb", save=False, value=33),
 }
 ALL_LIGHTING = ("rgblight", "backlight", "vialrgb")
-FLOWS = ("change", "undo", "recovery", "restore")
+FLOWS = ("change", "undo", "recovery", "restore", "profile")
 FAULTS = ("kill", "interrupt", "enospc")
 # Prepares a history so previous.json exists and must survive.
 EARLIER = SetKeyChange(layer=0, row=1, col=0, keycode="KC_Z")
@@ -168,6 +169,10 @@ def prepare(directory, flow, change):
         if flow == "undo":
             assert rig.apply(plan_change(rig, change)).outcome == "verified"
             return rig.service.create_undo_proposal(None).id
+        if flow == "profile":
+            rig.service.save_profile(None, "sweep")
+            assert rig.apply(plan_change(rig, change)).outcome == "verified"
+            return rig.service.plan_profile(None, "sweep").id
         # A killed write to recover from. The second write packet is late enough for the first to land.
         multi = plan_change_set(rig, [SetKeyChange(layer=0, row=0, col=0, keycode="KC_F1"), change])
         writes = []
@@ -338,3 +343,53 @@ def test_every_fault_at_every_site_for_every_family_and_flow(tmp_path):
     summary = "\n".join(f"{count} x {kind}" for kind, count in kinds.most_common()) + "\n" + "\n".join(failures[:20])
     assert not failures, f"{len(failures)} of {expected} cases failed:\n{summary}"
     assert fired == expected, f"only {fired} of {expected} injected faults fired"
+
+
+# Profile files: whatever fails, the old file is intact or the new one complete, and no write reaches a keyboard.
+
+def _profile_operations(rig, directory):
+    vil = directory / "in.vil"
+    return {
+        "save": lambda: rig.service.save_profile(None, "kept", overwrite=True),
+        "import": lambda: rig.service.import_profile(None, str(vil), "kept", overwrite=True),
+        "export": lambda: rig.service.export_configuration(None, str(directory / "out.json"), "vialtic", include_macros=True, overwrite=True),
+        "delete": lambda: rig.service.delete_profile("kept"),
+    }
+
+
+@pytest.mark.parametrize("operation", ["save", "import", "export", "delete"])
+@pytest.mark.parametrize("fault", FAULTS)
+def test_every_fault_at_every_profile_file_operation(tmp_path, operation, fault):
+    site = 0
+    while True:
+        site += 1
+        directory = tmp_path / f"run{site}"
+        rig = build_rig(directory)
+        rig.service.save_profile(None, "kept")
+        (directory / "in.vil").write_text(json.dumps(to_vil(rig.service.get_profile("kept"))[0]))
+        (directory / "out.json").write_text("old export")
+        old_profile = rig.store.profile_path("kept").read_bytes()
+        injector = Injector(target=site, fault=fault)
+        writes = rig.write_packets()
+        with state_file_sites(injector, directory):
+            rig.backend.packet_hook = None
+            injector.active = True
+            operations = _profile_operations(rig, directory)
+            try:
+                operations[operation]()
+            except (VialticError, KeyboardInterrupt, OSError, Killed):
+                pass
+            injector.active = injector.dead = False
+        assert rig.write_packets() == writes
+        current = rig.store.profile_path("kept")
+        if current.exists():
+            rig.service.get_profile("kept")
+            if operation not in ("save", "import"):
+                assert current.read_bytes() == old_profile, (operation, fault, site)
+        else:
+            assert operation == "delete", (operation, fault, site)
+        output = (directory / "out.json").read_text()
+        assert output == "old export" or json.loads(output)["kind"] == "profile"
+        if not injector.fired:
+            break
+    assert site > 2, "the sweep must reach file operations"

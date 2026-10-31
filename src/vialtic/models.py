@@ -510,7 +510,7 @@ class ProposalUnlock(Model):
     positions: list[UnlockPosition] = Field(default_factory=list)
 
 
-ProposalType = Literal["change", "undo", "recovery"]
+ProposalType = Literal["change", "undo", "recovery", "profile"]
 
 
 class Proposal(Envelope):
@@ -594,6 +594,119 @@ class Journal(Envelope):
     lighting_save_sent: bool = False
 
 
+# Profiles and interchange.
+
+class ProfileKey(Model):
+    layer: int = Field(ge=0, le=31)
+    row: int = Field(ge=0, le=255)
+    col: int = Field(ge=0, le=255)
+    keycode: str = Field(max_length=64)
+
+
+class ProfileEncoder(Model):
+    layer: int = Field(ge=0, le=31)
+    index: int = Field(ge=0, le=255)
+    direction: int = Field(ge=0, le=1)
+    keycode: str = Field(max_length=64)
+
+
+class ProfileSource(Model):
+    """Where a profile came from. A .vil file only says the firmware id and protocols."""
+
+    vial_uid: str
+    device_name: str | None = None
+    vendor_id: str | None = None
+    product_id: str | None = None
+    via_protocol: int | None = None
+    vial_protocol: int | None = None
+    layout_fingerprint: str | None = None
+    binding_id: str | None = None
+    numeric_keycodes: bool = False
+
+
+class ProfileConfiguration(Model):
+    """Absent means the profile says nothing about that family, and a plan leaves it alone.
+
+    `macro_buffer_b64` is the raw buffer and is what gets restored. `macros` is the parsed form,
+    which a .vil file holds and which is lossy for anything `lossy_macros` lists.
+    """
+
+    matrix: list[int] | None = Field(default=None, min_length=3, max_length=3)
+    keymap: list[ProfileKey] | None = None
+    encoders: list[ProfileEncoder] | None = None
+    layout_options: int | None = None
+    macro_count: int | None = None
+    macro_buffer_b64: str | None = None
+    macros: list[list[list[Any]]] | None = None
+    macros_redacted: bool = False
+    lossy_macros: list[int] = Field(default_factory=list)
+    tap_dance: list[list[Any]] | None = None
+    combos: list[list[Any]] | None = None
+    key_overrides: list[dict[str, Any]] | None = None
+    alt_repeat_keys: list[dict[str, Any]] | None = None
+    settings: dict[str, int] | None = None
+    lighting: LightingState | None = None
+
+    def has_macros(self) -> bool:
+        return self.macro_buffer_b64 is not None or self.macros is not None
+
+
+class Profile(Envelope):
+    """A named configuration. Local until a proposal is made from it."""
+
+    kind: Literal["profile"] = "profile"
+    name: str
+    created_at: datetime
+    origin: Literal["keyboard", "vil", "vialtic"]
+    vialtic_version: str
+    source: ProfileSource
+    configuration: ProfileConfiguration
+    omissions: list[str] = Field(default_factory=list)
+    unknown_fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProfileSummary(Model):
+    name: str
+    valid: bool
+    problem: str | None = None
+    created_at: datetime | None = None
+    origin: str | None = None
+    device_name: str | None = None
+    vial_uid: str | None = None
+
+
+class ProfileList(Envelope):
+    kind: Literal["profile_list"] = "profile_list"
+    profiles: list[ProfileSummary]
+
+
+class ProfileDeleted(Envelope):
+    kind: Literal["profile_deleted"] = "profile_deleted"
+    name: str
+
+
+class ProfileSaved(Envelope):
+    """No contents here: this goes to default output."""
+
+    kind: Literal["profile_saved"] = "profile_saved"
+    name: str
+    path: str
+    origin: str
+    compatibility: Literal["compatible", "unchecked"]
+    omissions: list[str] = Field(default_factory=list)
+    unknown_fields: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class ExportResult(Envelope):
+    kind: Literal["export_result"] = "export_result"
+    format: Literal["vil", "vialtic"]
+    path: str
+    macros_included: bool
+    omissions: list[str] = Field(default_factory=list)
+    unknown_fields: list[str] = Field(default_factory=list)
+
+
 # Diagnostics.
 
 class DoctorCheck(Model):
@@ -664,4 +777,9 @@ PUBLIC_SCHEMAS: dict[str, type[BaseModel]] = {
     "keycode_list": KeycodeList,
     "view": ViewResult,
     "version": VersionInfo,
+    "profile": Profile,
+    "profile_list": ProfileList,
+    "profile_saved": ProfileSaved,
+    "profile_deleted": ProfileDeleted,
+    "export_result": ExportResult,
 }

@@ -1,0 +1,26 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "profile_deleted",
+      "default": "profile_deleted",
+      "title": "Kind",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "ProfileDeleted",
+  "type": "object"
+}

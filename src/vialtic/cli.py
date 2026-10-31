@@ -20,10 +20,11 @@ from pydantic import BaseModel, ValidationError
 from . import __version__
 from .errors import EXIT_APPLY_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_USAGE, VialticError
 from .models import (
-    ApplyResult, ChangeSet, DeviceList, DoctorReport, InspectResult, KeycodeList, PUBLIC_SCHEMAS, Proposal, SCHEMA_VERSION,
+    ApplyResult, ChangeSet, DeviceList, DoctorReport, ExportResult, InspectResult, KeycodeList, PUBLIC_SCHEMAS, Profile,
+    ProfileDeleted, ProfileList, ProfileSaved, Proposal, SCHEMA_VERSION,
     SetEncoderChange, SetKeyChange, Snapshot, UnlockStatus, VersionInfo, ViewResult,
 )
-from .storage import atomic_write, state_root
+from .storage import atomic_write, data_root, state_root
 
 
 class UsageError(VialticError):
@@ -117,6 +118,36 @@ def build_parser() -> argparse.ArgumentParser:
     leaf(unlock, "poll", "Report unlock progress.")
     leaf(sub, "lock", "Lock the keyboard.")
 
+    profile = sub.add_parser("profile", help="Named local configurations.").add_subparsers(dest="action", required=True, parser_class=_Parser)
+    leaf(profile, "list", "List saved profiles.", device=False)
+    save = leaf(profile, "save", "Save the keyboard's complete configuration under a name. Macro contents are included, owner-only.")
+    save.add_argument("name")
+    save.add_argument("--overwrite", action="store_true", help="replace a profile with this name")
+    show_profile = leaf(profile, "show", "Show a saved profile.", device=False)
+    show_profile.add_argument("name")
+    show_profile.add_argument("--include-macros", action="store_true",
+                              help="include macro contents, which can hold typed text; left out by default")
+    delete = leaf(profile, "delete", "Delete a saved profile. It cannot be recovered.", device=False)
+    delete.add_argument("name")
+    plan_profile = leaf(profile, "plan", "Propose applying a profile. Writes nothing to the keyboard.")
+    plan_profile.add_argument("name")
+    plan_profile.add_argument("--lighting", choices=["save", "transient", "skip"], default="save",
+                              help="how to apply the profile's lighting (default: save, which is permanent)")
+
+    import_cmd = leaf(sub, "import", "Validate a .vil or Vialtic file and store it as a profile. Writes nothing to the keyboard.")
+    import_cmd.add_argument("file")
+    import_cmd.add_argument("--name", required=True, help="name for the new profile")
+    import_cmd.add_argument("--overwrite", action="store_true", help="replace a profile with this name")
+    import_cmd.add_argument("--offline", action="store_true", help="skip the compatibility check; `profile plan` still does it")
+
+    export_cmd = leaf(sub, "export", "Write the configuration to an owner-only file. Macro contents are left out by default.")
+    export_cmd.add_argument("--output", required=True, metavar="FILE")
+    export_cmd.add_argument("--format", choices=["vialtic", "vil"], default="vialtic",
+                            help="vialtic is complete; vil is what Vial reads and has no lighting")
+    export_cmd.add_argument("--profile", metavar="NAME", help="export a saved profile instead of the keyboard")
+    export_cmd.add_argument("--include-macros", action="store_true", help="include macro contents, which can hold typed text")
+    export_cmd.add_argument("--overwrite", action="store_true", help="replace an existing file")
+
     emulator = sub.add_parser("emulator", help="Development emulator state.").add_subparsers(dest="action", required=True, parser_class=_Parser)
     leaf(emulator, "list", "List emulator scenarios.", device=False)
     leaf(emulator, "reset", "Delete the selected scenario's simulated keyboards and files.", device=False)
@@ -205,10 +236,11 @@ def make_service(args: argparse.Namespace):
         directory = state_root() / "emulator" / scenario
         options.reconnect_poll = 0.1
         options.max_retries = 2
-        return VialticService(EmulatorBackend(scenario, directory, Faults.from_env()), Store(directory), options)
+        profiles = data_root() / "emulator" / scenario / "profiles"
+        return VialticService(EmulatorBackend(scenario, directory, Faults.from_env()), Store(directory, profiles), options)
     from .device import HidBackend
 
-    return VialticService(HidBackend(), Store(state_root()), options)
+    return VialticService(HidBackend(), Store(state_root(), data_root() / "profiles"), options)
 
 
 def _scenario(args: argparse.Namespace) -> str | None:
@@ -313,6 +345,49 @@ def _format_unlock(result: UnlockStatus) -> str:
     return f"Keyboard is {state}{counter}. Keys to hold: {keys}"
 
 
+def _format_profile_list(result: ProfileList) -> str:
+    lines = [f"{p.name:<24} {p.origin:<9} {p.device_name or p.vial_uid or ''} {p.created_at.isoformat() if p.created_at else ''}".rstrip()
+             if p.valid else f"{p.name:<24} unreadable ({p.problem})" for p in result.profiles]
+    return "\n".join(lines) or "No profiles saved."
+
+
+def _format_profile(result: Profile) -> str:
+    config = result.configuration
+    families = {"keymap": config.keymap, "encoders": config.encoders, "tap dance": config.tap_dance, "combos": config.combos,
+                "key overrides": config.key_overrides, "alternate repeat": config.alt_repeat_keys, "QMK settings": config.settings}
+    lines = [f"Profile {result.name} ({result.origin}), saved {result.created_at.isoformat()} by Vialtic {result.vialtic_version}",
+             f"  From: {result.source.device_name or 'a file'}, firmware {result.source.vial_uid}"]
+    lines += [f"  {name}: {len(value)} entries" for name, value in families.items() if value is not None]
+    lines.append(f"  Layout options: {config.layout_options}")
+    lines.append(f"  Lighting: {config.lighting.kind if config.lighting else 'not in this profile'}")
+    if config.macros_redacted:
+        lines.append("  Macros: in the profile, contents left out; use --include-macros")
+    elif config.has_macros():
+        lines.append(f"  Macros: {config.macros}")
+    else:
+        lines.append("  Macros: not in this profile")
+    lines.extend(f"  Left out: {o}" for o in result.omissions)
+    if result.unknown_fields:
+        lines.append(f"  Kept, not applied: {', '.join(sorted(result.unknown_fields))}")
+    return "\n".join(lines)
+
+
+def _format_profile_saved(result: ProfileSaved) -> str:
+    lines = [f"Profile {result.name} stored at {result.path} ({result.compatibility}). Nothing was written to a keyboard."]
+    lines.extend(f"  Left out: {o}" for o in result.omissions)
+    lines.extend(f"  Note: {n}" for n in result.notes)
+    lines.append(f"Propose it with `vialtic profile plan {result.name}`.")
+    return "\n".join(lines)
+
+
+def _format_export(result: ExportResult) -> str:
+    lines = [f"Wrote {result.path} ({result.format}, owner-only). Macro contents {'included' if result.macros_included else 'not included'}."]
+    lines.extend(f"  Left out: {o}" for o in result.omissions)
+    if result.unknown_fields:
+        lines.append(f"  Kept from the source: {', '.join(result.unknown_fields)}")
+    return "\n".join(lines)
+
+
 def _format_doctor(result: DoctorReport) -> str:
     lines = [f"vialtic {result.version} on {result.platform}" + (" (emulator)" if result.simulated else "")]
     for check in result.checks:
@@ -338,7 +413,8 @@ def _format_version(result: VersionInfo) -> str:
 FORMATTERS = {
     DeviceList: _format_devices, InspectResult: _format_inspect, Snapshot: _format_snapshot, Proposal: _format_proposal,
     ApplyResult: _format_apply, UnlockStatus: _format_unlock, DoctorReport: _format_doctor, KeycodeList: _format_keycodes,
-    ViewResult: _format_view, VersionInfo: _format_version,
+    ViewResult: _format_view, VersionInfo: _format_version, ProfileList: _format_profile_list, Profile: _format_profile,
+    ProfileSaved: _format_profile_saved, ExportResult: _format_export, ProfileDeleted: lambda r: f"Deleted profile {r.name}.",
 }
 
 
@@ -442,6 +518,24 @@ def run(args: argparse.Namespace) -> int:
             emit(args, service.unlock_poll(selector))
     elif command == "lock":
         emit(args, service.lock(selector))
+    elif command == "profile":
+        if action == "list":
+            emit(args, service.list_profiles())
+        elif action == "save":
+            emit(args, service.save_profile(selector, args.name, args.overwrite))
+        elif action == "show":
+            from .profiles import redact
+
+            profile = service.get_profile(args.name)
+            emit(args, profile if args.include_macros else redact(profile))
+        elif action == "delete":
+            emit(args, service.delete_profile(args.name))
+        else:
+            emit(args, _redacted(service.plan_profile(selector, args.name, args.lighting)))
+    elif command == "import":
+        emit(args, service.import_profile(selector, args.file, args.name, args.overwrite, args.offline))
+    elif command == "export":
+        emit(args, service.export_configuration(selector, args.output, args.format, args.profile, args.include_macros, args.overwrite))
     return EXIT_OK
 
 

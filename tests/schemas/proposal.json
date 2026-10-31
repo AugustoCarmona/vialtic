@@ -856,7 +856,8 @@
       "enum": [
         "change",
         "undo",
-        "recovery"
+        "recovery",
+        "profile"
       ],
       "title": "Proposal Type",
       "type": "string"
