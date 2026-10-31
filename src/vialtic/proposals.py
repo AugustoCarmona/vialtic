@@ -10,7 +10,8 @@ from . import vial_adapter as va
 from .device import Session, canonical_json
 from .errors import VialticError
 from .models import (
-    Baseline, Change, ComboValue, Configuration, SetComboChange, SetComboOperation, TapDanceValue, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
+    AltRepeatKeyValue, Baseline, Change, ComboValue, Configuration, KeyOverrideValue, SetAltRepeatKeyChange,
+    SetAltRepeatKeyOperation, SetComboChange, SetComboOperation, SetKeyOverrideChange, SetKeyOverrideOperation, TapDanceValue, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
     ProposalType, ProposalUnlock, SetEncoderChange, SetEncoderOperation, SetKeyChange, SetKeyOperation,
     SetLayoutOptionChange, SetLayoutOptionsOperation, SetTapDanceChange, SetTapDanceOperation, Snapshot, UnlockPosition,
     VerificationDifference,
@@ -28,7 +29,9 @@ RECOVERY_TEXT = ("Everything Vialtic can read from the keyboard is saved before 
                  "recovery command is reported.")
 
 FAMILY_OF_OPERATION = {"set_key": "keymap", "set_encoder": "encoders", "set_layout_options": "layout_options",
-                       "set_tap_dance": "tap_dance", "set_combo": "combos"}
+                       "set_tap_dance": "tap_dance", "set_combo": "combos", "set_key_override": "key_overrides",
+                       "set_alt_repeat_key": "alt_repeat_keys"}
+U8 = 0xFF
 U16 = 0xFFFF
 
 
@@ -44,6 +47,10 @@ def after_keycodes(op: Operation) -> list[KeycodeValue]:
         return [op.after.on_tap, op.after.on_hold, op.after.on_double_tap, op.after.on_tap_hold]
     if op.type == "set_combo":
         return [*op.after.keys, op.after.output]
+    if op.type == "set_key_override":
+        return [op.after.trigger, op.after.replacement]
+    if op.type == "set_alt_repeat_key":
+        return [op.after.keycode, op.after.alt_keycode]
     return []
 
 
@@ -182,6 +189,49 @@ class _Planner:
                                  "the first KC_NO, so the ones after it may be ignored.")
         self.operations.append(SetComboOperation(index=change.index, before=before, after=after))
 
+    def _options(self, value: int | None, current: int, known: int, what: str) -> int:
+        """Bits the pinned tables do not name may be kept, never changed."""
+        value = self._bounded(value, current, U8, f"The options of {what}")
+        if (value ^ current) & ~known & U8:
+            raise VialticError("invalid_request", f"The options of {what} change bits Vial does not define "
+                                                  f"(known mask 0x{known:02x}).")
+        return value
+
+    def _set_key_override(self, change: SetKeyOverrideChange) -> None:
+        _capability(self.kb.key_override_count, "key_overrides", "key overrides")
+        self._index(change.index, self.kb.key_override_count, "Key override")
+        self._once(("key_override", change.index), f"key override {change.index}")
+        before = va.key_override_value(self.config.key_overrides[change.index])
+        layers = self._bounded(change.layers, before.layers, U16, "The layer mask")
+        # All-ones is the firmware default and means every layer, however many there are.
+        if layers != U16 and layers != before.layers and layers >> self.kb.layers:
+            raise VialticError("invalid_layer_reference", f"Layer mask 0x{layers:04x} names a layer this keyboard (layers "
+                                                          f"0-{self.kb.layers - 1}) does not have.")
+        after = KeyOverrideValue(
+            trigger=self._merged_keycode(change.trigger, before.trigger),
+            replacement=self._merged_keycode(change.replacement, before.replacement), layers=layers,
+            trigger_mods=self._bounded(change.trigger_mods, before.trigger_mods, U8, "The trigger modifier mask"),
+            negative_mod_mask=self._bounded(change.negative_mod_mask, before.negative_mod_mask, U8, "The negative modifier mask"),
+            suppressed_mods=self._bounded(change.suppressed_mods, before.suppressed_mods, U8, "The suppressed modifier mask"),
+            options=self._options(change.options, before.options, va.KEY_OVERRIDE_KNOWN_OPTIONS, f"key override {change.index}"))
+        if after == before:
+            return self._skip(f"key override {change.index}")
+        self.operations.append(SetKeyOverrideOperation(index=change.index, before=before, after=after))
+
+    def _set_alt_repeat_key(self, change: SetAltRepeatKeyChange) -> None:
+        _capability(self.kb.alt_repeat_key_count, "alt_repeat_keys", "alternate repeat keys")
+        self._index(change.index, self.kb.alt_repeat_key_count, "Alternate repeat entry")
+        self._once(("alt_repeat", change.index), f"alternate repeat {change.index}")
+        before = va.alt_repeat_value(self.config.alt_repeat_keys[change.index])
+        after = AltRepeatKeyValue(
+            keycode=self._merged_keycode(change.keycode, before.keycode),
+            alt_keycode=self._merged_keycode(change.alt_keycode, before.alt_keycode),
+            allowed_mods=self._bounded(change.allowed_mods, before.allowed_mods, U8, "The allowed modifier mask"),
+            options=self._options(change.options, before.options, va.ALT_REPEAT_KNOWN_OPTIONS, f"alternate repeat {change.index}"))
+        if after == before:
+            return self._skip(f"alternate repeat {change.index}")
+        self.operations.append(SetAltRepeatKeyOperation(index=change.index, before=before, after=after))
+
     def finish(self) -> tuple[list[Operation], list[str]]:
         before = self.config.layout_options
         if self.layout_value is not None:
@@ -217,6 +267,10 @@ def describe_operation(op: Operation) -> str:
     if op.type == "set_combo":
         keys = [key.keycode for key in op.before.keys], [key.keycode for key in op.after.keys]
         return f"combo {op.index}: {keys[0]} => {op.before.output.keycode} -> {keys[1]} => {op.after.output.keycode}"
+    if op.type == "set_key_override":
+        return f"key override {op.index}: {_changed_fields(op.before, op.after)}"
+    if op.type == "set_alt_repeat_key":
+        return f"alternate repeat {op.index}: {_changed_fields(op.before, op.after)}"
     raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 
 
@@ -240,6 +294,8 @@ def family_state(config: Configuration) -> dict[str, dict[str, Any]]:
         "layout_options": {"value": config.layout_options},
         "tap_dance": {str(i): list(e) for i, e in enumerate(config.tap_dance)},
         "combos": {str(i): list(e) for i, e in enumerate(config.combos)},
+        "key_overrides": {str(i): dict(e) for i, e in enumerate(config.key_overrides)},
+        "alt_repeat_keys": {str(i): dict(e) for i, e in enumerate(config.alt_repeat_keys)},
     }
 
 
@@ -255,6 +311,10 @@ def operation_effect(op: Operation) -> tuple[str, str, Any, Any]:
         return "tap_dance", str(op.index), list(va.tap_dance_wire(op.before)), list(va.tap_dance_wire(op.after))
     if op.type == "set_combo":
         return "combos", str(op.index), list(va.combo_wire(op.before)), list(va.combo_wire(op.after))
+    if op.type == "set_key_override":
+        return "key_overrides", str(op.index), va.key_override_wire(op.before), va.key_override_wire(op.after)
+    if op.type == "set_alt_repeat_key":
+        return "alt_repeat_keys", str(op.index), va.alt_repeat_wire(op.before), va.alt_repeat_wire(op.after)
     raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 
 
@@ -295,6 +355,16 @@ def restore_operations(current: Configuration, target: Configuration) -> tuple[l
         for index, (have_combo, want_combo) in enumerate(zip(current.combos, target.combos)):
             if list(have_combo) != list(want_combo):
                 ops.append(SetComboOperation(index=index, before=va.combo_value(have_combo), after=va.combo_value(want_combo)))
+    if "key_overrides" not in blockers:
+        for index, (have_ko, want_ko) in enumerate(zip(current.key_overrides, target.key_overrides)):
+            if have_ko != want_ko:
+                ops.append(SetKeyOverrideOperation(index=index, before=va.key_override_value(have_ko),
+                                                   after=va.key_override_value(want_ko)))
+    if "alt_repeat_keys" not in blockers:
+        for index, (have_alt, want_alt) in enumerate(zip(current.alt_repeat_keys, target.alt_repeat_keys)):
+            if have_alt != want_alt:
+                ops.append(SetAltRepeatKeyOperation(index=index, before=va.alt_repeat_value(have_alt),
+                                                    after=va.alt_repeat_value(want_alt)))
 
     now_data, target_data = current.model_dump(mode="json"), target.model_dump(mode="json")
     blockers += [f for f in va.CHECKED_FAMILIES

@@ -280,8 +280,36 @@ class SetComboChange(Model):
     output: str | None = None
 
 
-Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange, SetTapDanceChange, SetComboChange],
-                   Field(discriminator="type")]
+class SetKeyOverrideChange(Model):
+    """Change one key override. Fields left out keep their current value. Masks are integers:
+    `layers` has one bit per layer, modifier masks follow QMK's MOD_BIT layout, and `options`
+    holds the firmware flags, with bit 7 enabling the entry."""
+
+    type: Literal["set_key_override"] = "set_key_override"
+    index: int
+    trigger: str | None = None
+    replacement: str | None = None
+    layers: int | None = None
+    trigger_mods: int | None = None
+    negative_mod_mask: int | None = None
+    suppressed_mods: int | None = None
+    options: int | None = None
+
+
+class SetAltRepeatKeyChange(Model):
+    """Change one alternate repeat entry. Fields left out keep their current value.
+    In `options`, bit 3 enables the entry."""
+
+    type: Literal["set_alt_repeat_key"] = "set_alt_repeat_key"
+    index: int
+    keycode: str | None = None
+    alt_keycode: str | None = None
+    allowed_mods: int | None = None
+    options: int | None = None
+
+
+Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange, SetTapDanceChange, SetComboChange,
+                         SetKeyOverrideChange, SetAltRepeatKeyChange], Field(discriminator="type")]
 
 
 class ChangeSet(Envelope):
@@ -344,8 +372,40 @@ class SetComboOperation(Model):
     after: ComboValue
 
 
+class KeyOverrideValue(Model):
+    trigger: KeycodeValue
+    replacement: KeycodeValue
+    layers: int
+    trigger_mods: int
+    negative_mod_mask: int
+    suppressed_mods: int
+    options: int
+
+
+class SetKeyOverrideOperation(Model):
+    type: Literal["set_key_override"] = "set_key_override"
+    index: int
+    before: KeyOverrideValue
+    after: KeyOverrideValue
+
+
+class AltRepeatKeyValue(Model):
+    keycode: KeycodeValue
+    alt_keycode: KeycodeValue
+    allowed_mods: int
+    options: int
+
+
+class SetAltRepeatKeyOperation(Model):
+    type: Literal["set_alt_repeat_key"] = "set_alt_repeat_key"
+    index: int
+    before: AltRepeatKeyValue
+    after: AltRepeatKeyValue
+
+
 Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation, SetLayoutOptionsOperation, SetTapDanceOperation,
-                            SetComboOperation], Field(discriminator="type")]
+                            SetComboOperation, SetKeyOverrideOperation, SetAltRepeatKeyOperation],
+                      Field(discriminator="type")]
 
 
 class Baseline(Model):

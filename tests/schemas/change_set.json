@@ -1,5 +1,74 @@
 {
   "$defs": {
+    "SetAltRepeatKeyChange": {
+      "additionalProperties": false,
+      "description": "Change one alternate repeat entry. Fields left out keep their current value.\nIn `options`, bit 3 enables the entry.",
+      "properties": {
+        "allowed_mods": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Mods"
+        },
+        "alt_keycode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alt Keycode"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "keycode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keycode"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Options"
+        },
+        "type": {
+          "const": "set_alt_repeat_key",
+          "default": "set_alt_repeat_key",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index"
+      ],
+      "title": "SetAltRepeatKeyChange",
+      "type": "object"
+    },
     "SetComboChange": {
       "additionalProperties": false,
       "description": "Change one combo. `keys` lists up to four inputs and replaces all of them. Fields left out keep their value.",
@@ -119,6 +188,111 @@
       "title": "SetKeyChange",
       "type": "object"
     },
+    "SetKeyOverrideChange": {
+      "additionalProperties": false,
+      "description": "Change one key override. Fields left out keep their current value. Masks are integers:\n`layers` has one bit per layer, modifier masks follow QMK's MOD_BIT layout, and `options`\nholds the firmware flags, with bit 7 enabling the entry.",
+      "properties": {
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "layers": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Layers"
+        },
+        "negative_mod_mask": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Negative Mod Mask"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Options"
+        },
+        "replacement": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replacement"
+        },
+        "suppressed_mods": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suppressed Mods"
+        },
+        "trigger": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trigger"
+        },
+        "trigger_mods": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trigger Mods"
+        },
+        "type": {
+          "const": "set_key_override",
+          "default": "set_key_override",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index"
+      ],
+      "title": "SetKeyOverrideChange",
+      "type": "object"
+    },
     "SetLayoutOptionChange": {
       "additionalProperties": false,
       "description": "Choose one firmware-defined layout alternative. `index` is its position in the option list.",
@@ -233,9 +407,11 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "set_alt_repeat_key": "#/$defs/SetAltRepeatKeyChange",
             "set_combo": "#/$defs/SetComboChange",
             "set_encoder": "#/$defs/SetEncoderChange",
             "set_key": "#/$defs/SetKeyChange",
+            "set_key_override": "#/$defs/SetKeyOverrideChange",
             "set_layout_option": "#/$defs/SetLayoutOptionChange",
             "set_tap_dance": "#/$defs/SetTapDanceChange"
           },
@@ -256,6 +432,12 @@
           },
           {
             "$ref": "#/$defs/SetComboChange"
+          },
+          {
+            "$ref": "#/$defs/SetKeyOverrideChange"
+          },
+          {
+            "$ref": "#/$defs/SetAltRepeatKeyChange"
           }
         ]
       },

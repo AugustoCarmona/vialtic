@@ -1,5 +1,32 @@
 {
   "$defs": {
+    "AltRepeatKeyValue": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_mods": {
+          "title": "Allowed Mods",
+          "type": "integer"
+        },
+        "alt_keycode": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "keycode": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "options": {
+          "title": "Options",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "keycode",
+        "alt_keycode",
+        "allowed_mods",
+        "options"
+      ],
+      "title": "AltRepeatKeyValue",
+      "type": "object"
+    },
     "Baseline": {
       "additionalProperties": false,
       "properties": {
@@ -166,6 +193,48 @@
       "title": "DeviceIdentity",
       "type": "object"
     },
+    "KeyOverrideValue": {
+      "additionalProperties": false,
+      "properties": {
+        "layers": {
+          "title": "Layers",
+          "type": "integer"
+        },
+        "negative_mod_mask": {
+          "title": "Negative Mod Mask",
+          "type": "integer"
+        },
+        "options": {
+          "title": "Options",
+          "type": "integer"
+        },
+        "replacement": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "suppressed_mods": {
+          "title": "Suppressed Mods",
+          "type": "integer"
+        },
+        "trigger": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "trigger_mods": {
+          "title": "Trigger Mods",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "trigger",
+        "replacement",
+        "layers",
+        "trigger_mods",
+        "negative_mod_mask",
+        "suppressed_mods",
+        "options"
+      ],
+      "title": "KeyOverrideValue",
+      "type": "object"
+    },
     "KeycodeValue": {
       "additionalProperties": false,
       "description": "A firmware keycode. `raw` is authoritative, `keycode`/`label` are for people.",
@@ -210,6 +279,34 @@
         "required"
       ],
       "title": "ProposalUnlock",
+      "type": "object"
+    },
+    "SetAltRepeatKeyOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/AltRepeatKeyValue"
+        },
+        "before": {
+          "$ref": "#/$defs/AltRepeatKeyValue"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_alt_repeat_key",
+          "default": "set_alt_repeat_key",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "before",
+        "after"
+      ],
+      "title": "SetAltRepeatKeyOperation",
       "type": "object"
     },
     "SetComboOperation": {
@@ -314,6 +411,34 @@
         "after"
       ],
       "title": "SetKeyOperation",
+      "type": "object"
+    },
+    "SetKeyOverrideOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/KeyOverrideValue"
+        },
+        "before": {
+          "$ref": "#/$defs/KeyOverrideValue"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_key_override",
+          "default": "set_key_override",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "before",
+        "after"
+      ],
+      "title": "SetKeyOverrideOperation",
       "type": "object"
     },
     "SetLayoutOptionsOperation": {
@@ -472,9 +597,11 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "set_alt_repeat_key": "#/$defs/SetAltRepeatKeyOperation",
             "set_combo": "#/$defs/SetComboOperation",
             "set_encoder": "#/$defs/SetEncoderOperation",
             "set_key": "#/$defs/SetKeyOperation",
+            "set_key_override": "#/$defs/SetKeyOverrideOperation",
             "set_layout_options": "#/$defs/SetLayoutOptionsOperation",
             "set_tap_dance": "#/$defs/SetTapDanceOperation"
           },
@@ -495,6 +622,12 @@
           },
           {
             "$ref": "#/$defs/SetComboOperation"
+          },
+          {
+            "$ref": "#/$defs/SetKeyOverrideOperation"
+          },
+          {
+            "$ref": "#/$defs/SetAltRepeatKeyOperation"
           }
         ]
       },

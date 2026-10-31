@@ -20,7 +20,7 @@ import threading
 
 from .errors import VialticError
 from .models import (
-    Capabilities, ComboValue, Configuration, EncoderEntry, KeyGeometry, KeycodeInfo, KeycodeValue, KeymapEntry,
+    AltRepeatKeyValue, Capabilities, ComboValue, Configuration, KeyOverrideValue, EncoderEntry, KeyGeometry, KeycodeInfo, KeycodeValue, KeymapEntry,
     LayoutGeometry, LightingState, MacroState, SettingsState, TapDanceValue,
 )
 
@@ -52,6 +52,8 @@ from keycodes.keycodes import RESET_KEYCODE, Keycode, recreate_keyboard_keycodes
 from any_keycode import AnyKeycode, functions as ANY_KEYCODE_FUNCTIONS  # noqa: E402
 from editor.qmk_settings import QmkSettings  # noqa: E402
 from protocol import constants as proto  # noqa: E402
+from protocol.alt_repeat_key import AltRepeatKeyEntry  # noqa: E402
+from protocol.key_override import KeyOverrideEntry  # noqa: E402
 from protocol.keyboard_comm import (  # noqa: E402
     SUPPORTED_VIA_PROTOCOL, SUPPORTED_VIAL_PROTOCOL, Keyboard, ProtocolError,
 )
@@ -79,7 +81,7 @@ CHECKED_FAMILIES = [
     "key_overrides", "alt_repeat_keys", "settings",
 ]
 ALL_FAMILIES = CHECKED_FAMILIES + ["lighting"]
-RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options", "tap_dance", "combos"}
+RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options", "tap_dance", "combos", "key_overrides", "alt_repeat_keys"}
 
 
 class HeadlessKeyboard(Keyboard):
@@ -401,7 +403,8 @@ def lighting_kind(kb: Keyboard) -> str:
 def writable_operations(kb: Keyboard) -> list[str]:
     """Operations this keyboard can take; a family it lacks is not offered."""
     available = {"set_key": True, "set_encoder": bool(kb.encoder_count), "set_layout_option": bool(kb.layout_labels),
-                 "set_tap_dance": bool(kb.tap_dance_count), "set_combo": bool(kb.combo_count)}
+                 "set_tap_dance": bool(kb.tap_dance_count), "set_combo": bool(kb.combo_count),
+                 "set_key_override": bool(kb.key_override_count), "set_alt_repeat_key": bool(kb.alt_repeat_key_count)}
     return [name for name, present in available.items() if present]
 
 
@@ -420,6 +423,7 @@ def capabilities_of(kb: Keyboard) -> Capabilities:
 
 def read_configuration(kb: Keyboard) -> Configuration:
     """Convert a freshly reloaded Keyboard. Raw codes come back through upstream's codec."""
+    load_raw_options(kb)
     keymap = [KeymapEntry(layer=l, row=r, col=c, **to_value(code).model_dump())
               for (l, r, c), code in sorted(kb.layout.items())]
     encoders = [EncoderEntry(layer=l, index=i, direction=d, **to_value(code).model_dump())
@@ -474,6 +478,10 @@ def coverage_of(kb: Keyboard, config: Configuration) -> dict[str, str]:
     }
 
 
+KEY_OVERRIDE_KNOWN_OPTIONS = 0b10111111
+ALT_REPEAT_KNOWN_OPTIONS = 0b00001111
+
+
 # Writes. Upstream's setters update their in-memory copy before sending and some ignore the
 # outcome, so callers must prove every write by reloading from the keyboard.
 
@@ -496,6 +504,55 @@ def combo_wire(value: ComboValue) -> tuple:
     return (*(key.keycode for key in value.keys), value.output.keycode)
 
 
+class _RawOptions:
+    """Stands in for upstream's option classes, which drop every bit they do not name."""
+
+    def __init__(self, value: int):
+        self.value = value
+
+    def serialize(self) -> int:
+        return self.value
+
+
+def load_raw_options(kb: Keyboard) -> None:
+    """Replace upstream's filtered option bytes with what the firmware holds."""
+    for entries, cmd, count, fmt in (
+            (kb.key_override_entries, proto.DYNAMIC_VIAL_KEY_OVERRIDE_GET, kb.key_override_count, "<HHHBBBB"),
+            (kb.alt_repeat_key_entries, proto.DYNAMIC_VIAL_ALT_REPEAT_KEY_GET, kb.alt_repeat_key_count, "<HHBB")):
+        for entry, raw in zip(entries, kb._retrieve_dynamic_entries(cmd, count, fmt)):
+            entry.options = _RawOptions(raw[-1])
+
+
+def key_override_value(entry: dict) -> KeyOverrideValue:
+    return KeyOverrideValue(**{**entry, "trigger": to_value(entry["trigger"]), "replacement": to_value(entry["replacement"])})
+
+
+def key_override_wire(value: KeyOverrideValue) -> dict:
+    """The form upstream saves entries in, which is also what snapshots hold."""
+    return {**value.model_dump(), "trigger": value.trigger.keycode, "replacement": value.replacement.keycode}
+
+
+def _key_override_entry(value: KeyOverrideValue) -> KeyOverrideEntry:
+    entry = KeyOverrideEntry((value.trigger.keycode, value.replacement.keycode, value.layers, value.trigger_mods,
+                              value.negative_mod_mask, value.suppressed_mods, 0))
+    entry.options = _RawOptions(value.options)
+    return entry
+
+
+def alt_repeat_value(entry: dict) -> AltRepeatKeyValue:
+    return AltRepeatKeyValue(**{**entry, "keycode": to_value(entry["keycode"]), "alt_keycode": to_value(entry["alt_keycode"])})
+
+
+def alt_repeat_wire(value: AltRepeatKeyValue) -> dict:
+    return {**value.model_dump(), "keycode": value.keycode.keycode, "alt_keycode": value.alt_keycode.keycode}
+
+
+def _alt_repeat_entry(value: AltRepeatKeyValue) -> AltRepeatKeyEntry:
+    entry = AltRepeatKeyEntry((value.keycode.keycode, value.alt_keycode.keycode, value.allowed_mods, 0))
+    entry.options = _RawOptions(value.options)
+    return entry
+
+
 def write_operation(kb: Keyboard, op) -> None:
     if op.type == "set_key":
         kb.set_key(op.layer, op.row, op.col, op.after.keycode)
@@ -507,6 +564,10 @@ def write_operation(kb: Keyboard, op) -> None:
         kb.tap_dance_set(op.index, tap_dance_wire(op.after))
     elif op.type == "set_combo":
         kb.combo_set(op.index, combo_wire(op.after))
+    elif op.type == "set_key_override":
+        kb.key_override_set(op.index, _key_override_entry(op.after))
+    elif op.type == "set_alt_repeat_key":
+        kb.alt_repeat_key_set(op.index, _alt_repeat_entry(op.after))
     else:
         raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 

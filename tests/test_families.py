@@ -9,7 +9,10 @@ from conftest import Rig
 from vialtic import proposals
 from vialtic.emulator import Faults
 from vialtic.errors import VialticError
-from vialtic.models import ChangeSet, SetComboChange, SetKeyChange, SetLayoutOptionChange, SetTapDanceChange
+from vialtic.models import (
+    ChangeSet, SetAltRepeatKeyChange, SetComboChange, SetKeyChange, SetKeyOverrideChange, SetLayoutOptionChange,
+    SetTapDanceChange,
+)
 from vialtic.service import attestation_for
 
 
@@ -227,3 +230,107 @@ def test_combo_boot_output_needs_unlock(tmp_path):
     undo(rig)
     assert firmware(rig).state["combos"][0][4] == 0
     assert rig.service.create_undo_proposal(None).unlock.required, "restoring QK_BOOT needs the same unlock"
+
+
+# Key overrides.
+
+def test_key_override_cycle(tmp_path):
+    rig = full(tmp_path)
+    proposal = plan(rig, SetKeyOverrideChange(index=1, trigger="KC_A", replacement="KC_B", layers=0b11, trigger_mods=1, options=0x87))
+    assert "replacement KC_NO -> KC_B" in proposals.describe_operation(proposal.operations[0])
+    check_family_cycle(rig, proposal, lambda: list(firmware(rig).state["key_overrides"][1]), "key_overrides")
+
+
+def test_key_override_keeps_option_bits_upstream_drops(tmp_path):
+    rig = full(tmp_path)
+    firmware(rig).state["key_overrides"][0] = [4, 5, 0xFFFF, 0, 0, 0, 0b11000000]  # bit 6 is not named upstream
+    assert rig.service.read_snapshot().configuration.key_overrides[0]["options"] == 0b11000000
+    assert rig.apply(plan(rig, SetKeyOverrideChange(index=0, trigger_mods=2))).outcome == "verified"
+    assert firmware(rig).state["key_overrides"][0][6] == 0b11000000
+    undo(rig)
+    assert firmware(rig).state["key_overrides"][0] == [4, 5, 0xFFFF, 0, 0, 0, 0b11000000]
+
+
+def test_key_override_unknown_bit_cannot_be_changed(tmp_path):
+    refused(full(tmp_path), "invalid_request", SetKeyOverrideChange(index=0, options=0b01000000))
+
+
+def test_lost_unknown_option_bit_is_a_difference(tmp_path):
+    """Upstream's filter would hide this: both sides look equal once the bit is dropped."""
+    rig = full(tmp_path)
+    firmware(rig).state["key_overrides"][0] = [4, 5, 0xFFFF, 0, 0, 0, 0b11000000]
+    proposal = plan(rig, SetKeyOverrideChange(index=0, trigger_mods=2))
+    original = rig.service._write_operation
+
+    def clears_the_bit(session, op):
+        original(session, op)
+        firmware(rig).state["key_overrides"][0][6] = 0b10000000
+
+    rig.service._write_operation = staticmethod(clears_the_bit)
+    assert rig.apply(proposal).outcome != "verified"
+
+
+@pytest.mark.parametrize("change, code", [
+    (dict(index=2, trigger="KC_A"), "invalid_coordinate"), (dict(index=0, trigger="KC_NOPE"), "invalid_keycode"),
+    (dict(index=0, layers=0x10000), "invalid_request"), (dict(index=0, layers=0b100), "invalid_layer_reference"),
+    (dict(index=0, trigger_mods=256), "invalid_request"), (dict(index=0, negative_mod_mask=-1), "invalid_request"),
+    (dict(index=0, suppressed_mods=999), "invalid_request"), (dict(index=0, options=256), "invalid_request"),
+])
+def test_key_override_bounds(tmp_path, change, code):
+    refused(full(tmp_path), code, SetKeyOverrideChange(**change))
+
+
+def test_key_override_all_layers_mask_is_allowed(tmp_path):
+    rig = full(tmp_path)
+    firmware(rig).state["key_overrides"][0][2] = 1
+    assert plan(rig, SetKeyOverrideChange(index=0, layers=0xFFFF)).operations[0].after.layers == 0xFFFF
+
+
+def test_key_override_without_capability(tmp_path):
+    error = refused(Rig(tmp_path, "minimal"), "capability_unavailable", SetKeyOverrideChange(index=0, trigger="KC_A"))
+    assert error.details["family"] == "key_overrides"
+
+
+def test_key_override_boot_replacement_needs_unlock(tmp_path):
+    rig = full(tmp_path)
+    proposal = plan(rig, SetKeyOverrideChange(index=0, trigger="KC_A", replacement="QK_BOOT", options=0x80))
+    assert proposal.unlock.required
+    assert rig.apply(proposal).outcome == "verified" and firmware(rig).state["key_overrides"][0][1] == firmware(rig).boot_code
+
+
+# Alternate repeat keys.
+
+def test_alt_repeat_cycle(tmp_path):
+    rig = full(tmp_path)
+    proposal = plan(rig, SetAltRepeatKeyChange(index=1, keycode="KC_A", alt_keycode="KC_B", allowed_mods=3, options=0b1001))
+    assert "alt_keycode KC_NO -> KC_B" in proposals.describe_operation(proposal.operations[0])
+    check_family_cycle(rig, proposal, lambda: list(firmware(rig).state["alt_repeat"][1]), "alt_repeat_keys")
+
+
+def test_alt_repeat_keeps_option_bits_upstream_drops(tmp_path):
+    rig = full(tmp_path)
+    firmware(rig).state["alt_repeat"][0] = [4, 5, 0, 0b10001000]
+    assert rig.apply(plan(rig, SetAltRepeatKeyChange(index=0, allowed_mods=1))).outcome == "verified"
+    assert firmware(rig).state["alt_repeat"][0][3] == 0b10001000
+    refused(rig, "invalid_request", SetAltRepeatKeyChange(index=0, options=0b00001000))
+
+
+@pytest.mark.parametrize("change, code", [
+    (dict(index=2, keycode="KC_A"), "invalid_coordinate"), (dict(index=0, alt_keycode="KC_NOPE"), "invalid_keycode"),
+    (dict(index=0, allowed_mods=256), "invalid_request"), (dict(index=0, options=0x10), "invalid_request"),
+])
+def test_alt_repeat_bounds(tmp_path, change, code):
+    refused(full(tmp_path), code, SetAltRepeatKeyChange(**change))
+
+
+def test_alt_repeat_without_capability(tmp_path):
+    error = refused(Rig(tmp_path, "minimal"), "capability_unavailable", SetAltRepeatKeyChange(index=0, keycode="KC_A"))
+    assert error.details["family"] == "alt_repeat_keys"
+
+
+@pytest.mark.parametrize("field", ["keycode", "alt_keycode"])
+def test_alt_repeat_boot_needs_unlock(tmp_path, field):
+    rig = full(tmp_path)
+    proposal = plan(rig, SetAltRepeatKeyChange(index=0, **{field: "QK_BOOT"}))
+    assert proposal.unlock.required and rig.apply(proposal).outcome == "verified"
+    assert rig.service.read_snapshot().configuration.alt_repeat_keys[0][field] == "QK_BOOT"
