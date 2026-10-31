@@ -46,6 +46,7 @@ OPERATIONS = {
     "lighting_saved": SetLightingChange(system="vialrgb", save=True, mode=3),
     "lighting_transient": SetLightingChange(system="vialrgb", save=False, value=33),
 }
+ALL_LIGHTING = ("rgblight", "backlight", "vialrgb")
 FLOWS = ("change", "undo", "recovery", "restore")
 FAULTS = ("kill", "interrupt", "enospc")
 # Prepares a history so previous.json exists and must survive.
@@ -227,6 +228,16 @@ def check_invariants(directory, flow, proposal, start, previous_before, pending_
         if path.exists():
             read_model(path, Snapshot)
 
+    # Dying during a physical unlock leaves the firmware waiting: it is reported, and a replug ends it.
+    firmware = fresh.backend.firmware(0)
+    if firmware.state["unlock_in_progress"]:
+        with pytest.raises(VialticError) as waiting:
+            fresh.service.read_snapshot()
+        assert waiting.value.code == "unlock_in_progress"
+        assert fresh.service.unlock_status(None).in_progress
+        firmware.power_cycle()
+        fresh.backend.save()
+
     # Nothing writes on startup, whatever state the last process left.
     snapshot = fresh.service.read_snapshot()
     inspect = fresh.service.inspect_device()
@@ -234,8 +245,8 @@ def check_invariants(directory, flow, proposal, start, previous_before, pending_
     assert fresh.write_packets() == 0, "a read or a restart sent a write"
 
     observed = snapshot.configuration
-    at_target = not proposals.compare_state(start, proposal.operations, observed, check_lighting=True)
-    at_start = not proposals.compare_state(start, [], observed, check_lighting=True)
+    at_target = not proposals.compare_state(start, proposal.operations, observed, lighting_systems=ALL_LIGHTING)
+    at_start = not proposals.compare_state(start, [], observed, lighting_systems=ALL_LIGHTING)
 
     if outcome == "verified":
         assert at_target, "verified, but the keyboard differs"
@@ -254,10 +265,9 @@ def check_invariants(directory, flow, proposal, start, previous_before, pending_
             backup = pending if pending.exists() else (previous if at_target else None)
             assert backup is not None and backup.exists(), "the keyboard changed and no backup holds the prior state"
             saved = read_model(backup, Snapshot).configuration
-            assert not proposals.compare_state(saved, [], start, check_lighting=True), "the backup is not the prior state"
+            assert not proposals.compare_state(saved, [], start, lighting_systems=ALL_LIGHTING), "the backup is not the prior state"
 
     # A keyboard left unlocked must be reported, somewhere a person will see it.
-    firmware = fresh.backend.firmware(0)
     if firmware.state["unlocked"] and not started_unlocked:
         reported = relock_error or inspect.warnings or any("lock" in c.name and c.status == "warning" for c in doctor.checks)
         assert reported, "left unlocked without saying so"
@@ -272,9 +282,9 @@ def check_invariants(directory, flow, proposal, start, previous_before, pending_
         assert not fresh.store.has_unresolved_write(binding)
         after = fresh.service.read_snapshot().configuration
         if flow == "recovery":
-            assert not proposals.compare_state(start, proposal.operations, after, check_lighting=True)
+            assert not proposals.compare_state(start, proposal.operations, after, lighting_systems=ALL_LIGHTING)
         else:
-            assert not proposals.compare_state(start, [], after, check_lighting=True), "recovery did not restore the prior state"
+            assert not proposals.compare_state(start, [], after, lighting_systems=ALL_LIGHTING), "recovery did not restore the prior state"
     else:
         assert at_start or at_target, "nothing to recover, yet the keyboard holds a mix"
     if firmware.state["unlocked"] and not started_unlocked:

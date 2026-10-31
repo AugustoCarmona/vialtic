@@ -405,7 +405,7 @@ def run(args: argparse.Namespace) -> int:
         if not args.include_macros:
             snapshot = _redact_macros(snapshot)
         if args.output:
-            atomic_write(pathlib.Path(args.output), snapshot.model_dump_json(indent=2).encode())
+            atomic_write(pathlib.Path(args.output), snapshot.model_dump_json(indent=2).encode(), own_directory=False)
             _progress(f"Snapshot written to {args.output}")
         emit(args, snapshot)
     elif command == "view":

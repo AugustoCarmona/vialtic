@@ -74,10 +74,12 @@ LEGACY_DEFINITION = {
 
 FULL_DEFINITION = {
     "name": "Vialtic Full", "lighting": "vialrgb", "matrix": {"rows": 2, "cols": 3},
+    "customKeycodes": [{"name": "MY_KEY", "title": "My key", "shortName": "Mine"}],
     "layouts": {
         "labels": ["Split backspace", ["Bottom row", "ANSI", "ISO", "Compact"]],
         "keymap": [
-            ["0,0", "0,1\n\n\n0,0", {"x": 0.5}, "0,0\n\n\n\n\n\n\n\n\ne", "0,1\n\n\n\n\n\n\n\n\ne"],
+            ["0,0", "0,1\n\n\n0,0", {"x": 0.5}, "0,0\n\n\n\n\n\n\n\n\ne", "0,1\n\n\n\n\n\n\n\n\ne",
+             "1,0\n\n\n\n\n\n\n\n\ne", "1,1\n\n\n\n\n\n\n\n\ne"],
             ["1,0\n\n\n1,0", "1,1\n\n\n1,1", "1,2\n\n\n1,2"],
         ],
     },
@@ -113,6 +115,7 @@ class DeviceSpec:
     alt_repeat_key_count: int = 2
     settings: tuple[int, ...] = (1, 2, 7)
     unlock_keys: tuple[tuple[int, int], ...] = ((0, 0), (0, 1))
+    backlight_levels: int = 3  # QMK's default
 
 
 # Every qsid in the pinned table: widths of 1, 2 and 4 bytes, plain booleans and bit fields.
@@ -184,15 +187,19 @@ def _initial_keymap(spec: DeviceSpec) -> bytes:
     return bytes(cells)
 
 
-INITIAL_LIGHTING = {"rgb_brightness": 128, "rgb_effect": 1, "rgb_speed": 5, "rgb_h": 32, "rgb_s": 64, "bl_brightness": 42,
-                    "bl_effect": 0, "mode": 2, "speed": 90, "h": 16, "s": 32, "v": 64}
+INITIAL_LIGHTING = {"rgb_brightness": 128, "rgb_effect": 1, "rgb_enabled": True, "rgb_speed": 5, "rgb_h": 32, "rgb_s": 64,
+                    "bl_brightness": 85, "bl_effect": 0, "mode": 2, "speed": 90, "h": 16, "s": 32, "v": 64}
 VIALRGB_EFFECTS = (1, 2, 3)
 VIALRGB_MAX_BRIGHTNESS = 128
+RGBLIGHT_MODES = 35
+# All that firmware honours while an unlock is in progress. Anything else is echoed back unchanged.
+DURING_UNLOCK = {proto.CMD_VIAL_GET_KEYBOARD_ID, proto.CMD_VIAL_GET_SIZE, proto.CMD_VIAL_GET_DEFINITION,
+                 proto.CMD_VIAL_GET_UNLOCK_STATUS, proto.CMD_VIAL_UNLOCK_START, proto.CMD_VIAL_UNLOCK_POLL}
 
 
 def _initial_state(spec: DeviceSpec) -> dict[str, Any]:
     labels = spec.definition["layouts"].get("labels") or []
-    encoders = max([0] + [1 for row in spec.definition["layouts"]["keymap"] for k in row
+    encoders = max([0] + [int(k.split(",")[0]) + 1 for row in spec.definition["layouts"]["keymap"] for k in row
                           if isinstance(k, str) and k.endswith("\ne")])
     qsids = {str(q): 0 for q in spec.settings}
     macro = b"\x00" * spec.macro_count
@@ -255,6 +262,8 @@ class Firmware:
     def handle(self, msg: bytes) -> bytes:
         resp = bytearray(msg.ljust(va.MSG_LEN, b"\x00"))
         cmd = msg[0]
+        if self.state["unlock_in_progress"] and not (cmd == proto.CMD_VIA_VIAL_PREFIX and msg[1] in DURING_UNLOCK):
+            return bytes(resp)
         if cmd == proto.CMD_VIA_GET_PROTOCOL_VERSION:
             resp[1:3] = struct.pack(">H", self.spec.via_protocol)
         elif cmd == proto.CMD_VIA_GET_KEYBOARD_VALUE:
@@ -304,7 +313,7 @@ class Firmware:
         if sub == proto.QMK_RGBLIGHT_BRIGHTNESS:
             resp[2] = light["rgb_brightness"]
         elif sub == proto.QMK_RGBLIGHT_EFFECT:
-            resp[2] = light["rgb_effect"]
+            resp[2] = light["rgb_effect"] if light.setdefault("rgb_enabled", True) else 0
         elif sub == proto.QMK_RGBLIGHT_EFFECT_SPEED:
             resp[2] = light["rgb_speed"]
         elif sub == proto.QMK_RGBLIGHT_COLOR:
@@ -326,13 +335,26 @@ class Firmware:
     def _lighting_set(self, msg: bytes) -> None:
         light = self.state["lighting"]
         sub = msg[1]
-        names = {proto.QMK_RGBLIGHT_BRIGHTNESS: "rgb_brightness", proto.QMK_RGBLIGHT_EFFECT: "rgb_effect",
-                 proto.QMK_RGBLIGHT_EFFECT_SPEED: "rgb_speed", proto.QMK_BACKLIGHT_BRIGHTNESS: "bl_brightness",
-                 proto.QMK_BACKLIGHT_EFFECT: "bl_effect"}
-        if sub in names:
-            light[names[sub]] = msg[2]
+        enabled = light.setdefault("rgb_enabled", True)
+        if sub == proto.QMK_RGBLIGHT_BRIGHTNESS:
+            if enabled:  # rgblight_sethsv_noeeprom does nothing while off
+                light["rgb_brightness"] = msg[2]
+        elif sub == proto.QMK_RGBLIGHT_EFFECT:
+            # rgblight_mode_noeeprom: ignored while off, clamped otherwise. Then 0 turns off and anything else on.
+            if enabled:
+                light["rgb_effect"] = min(max(msg[2], 1), RGBLIGHT_MODES)
+            light["rgb_enabled"] = msg[2] != 0
+        elif sub == proto.QMK_RGBLIGHT_EFFECT_SPEED:
+            light["rgb_speed"] = msg[2]
+        elif sub == proto.QMK_BACKLIGHT_BRIGHTNESS:
+            # Firmware keeps a level, not the byte it was given.
+            level = msg[2] * self.spec.backlight_levels // 255
+            light["bl_brightness"] = level * 255 // self.spec.backlight_levels
+        elif sub == proto.QMK_BACKLIGHT_EFFECT:
+            light["bl_effect"] = 1 if msg[2] else 0  # breathing on or off
         elif sub == proto.QMK_RGBLIGHT_COLOR:
-            light["rgb_h"], light["rgb_s"] = msg[2], msg[3]
+            if enabled:
+                light["rgb_h"], light["rgb_s"] = msg[2], msg[3]
         elif sub == proto.VIALRGB_SET_MODE:
             mode, speed, hue, saturation, value = struct.unpack("<HBBBB", msg[2:8])
             # Like the firmware: unknown effects are ignored and brightness is clamped.

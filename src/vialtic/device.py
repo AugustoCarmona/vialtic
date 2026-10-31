@@ -360,8 +360,8 @@ class DeviceManager:
                     raise
                 return DeviceEntry(identity=complete_identity(base, kb), status="ready")
         except VialticError as exc:
-            status = {"permission_denied": "permission_denied", "device_busy": "busy", "lock_timeout": "busy"}.get(
-                exc.code, "error")
+            status = {"permission_denied": "permission_denied", "device_busy": "busy", "lock_timeout": "busy",
+                      "unlock_in_progress": "busy"}.get(exc.code, "error")
             return DeviceEntry(identity=base, status=status, problem=problem_info(exc))
 
     def list_devices(self) -> tuple[list[DeviceEntry], list[IgnoredInterface], dict[str, dict[str, Any]]]:
@@ -388,6 +388,33 @@ class DeviceManager:
                                details={"candidates": [e.model_dump(mode="json") for e in entries]},
                                next_steps=["Ask the user which keyboard to use, then pass --device <device_id>."])
         return self._usable(entries[0]), by_id[entries[0].identity.device_id], entries
+
+    def select_interface(self, selector: str | None) -> dict[str, Any]:
+        """Selection that talks to no keyboard, for the commands that must work during an unlock."""
+        candidates, _ = self.interfaces()
+        if selector:
+            for desc in candidates:
+                if selector in (device_id_for(desc), _path_text(desc["path"])):
+                    return desc
+            raise VialticError("device_not_found", f"No connected keyboard matches {selector!r}.",
+                               next_steps=["Run `vialtic devices list`; device ids change when a keyboard is replugged."])
+        if not candidates:
+            raise VialticError("no_device", "No USB Vial keyboard was found.", next_steps=["Connect the keyboard by USB."])
+        if len(candidates) > 1:
+            raise VialticError("device_selection_required", f"{len(candidates)} keyboards are connected. Choose one.",
+                               next_steps=["Ask the user which keyboard to use, then pass --device <device_id>."])
+        return candidates[0]
+
+    @contextlib.contextmanager
+    def security_session(self, desc: dict[str, Any]) -> Iterator[Session]:
+        """Opens a keyboard without reading its configuration, which an unlock in progress does not allow."""
+        with va.CONTEXT_LOCK, self._opened(desc) as (kb, transport, handle):
+            try:
+                data = kb.usb_send(handle, struct.pack("BB", proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_GET_KEYBOARD_ID), retries=20)
+                kb.vial_protocol, kb.keyboard_id = struct.unpack("<IQ", data[0:12])
+            except RuntimeError as exc:
+                raise VialticError("device_communication_failed", f"The keyboard stopped responding: {exc}") from exc
+            yield Session(handle, kb, transport, base_identity(desc, self.backend.simulated))
 
     @staticmethod
     def _usable(entry: DeviceEntry) -> DeviceEntry:

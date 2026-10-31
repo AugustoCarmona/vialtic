@@ -57,8 +57,8 @@ Rules worth knowing:
 - **Alternate repeat `options`:** bit 0 default to this key, 1 bidirectional, 2 ignore handedness, 3 enabled. Unnamed bits behave the same way.
 - **Combos:** `keys` replaces all four inputs. A `KC_NO` before another input gets a warning.
 - **QMK settings:** give `value`, or `bit` and `enabled` for one flag. Ranges and flags come from the pinned table. Bits the table does not define can be kept but not changed. Settings unknown to the table are refused, as are ones the firmware refuses to report.
-- **Macros:** one macro is replaced at a time; the others keep their exact bytes, even malformed ones. Text may hold printable ASCII, tabs and newlines. `KC_NO` is refused because it would encode a zero byte, which ends a macro. Delays need Vial protocol 2 or newer, and 16-bit keycodes need protocol 5 or newer. A result over the buffer size is refused with `capacity_exceeded`, never truncated.
-- **Lighting:** `save` is required. `true` sends the firmware's one save command after the values verify. It saves all lighting, not just this system. `false` lasts until the keyboard loses power. A request cannot mix them.
+- **Macros:** one macro is replaced at a time; the others keep their exact bytes, even malformed ones. The unused rest of the buffer is zeroed, so a cleared macro's text does not stay in keyboard memory. Text may hold printable ASCII, tabs and newlines. `KC_NO` is refused because it would encode a zero byte, which ends a macro. Delays need Vial protocol 2 or newer, and 16-bit keycodes need protocol 5 or newer. A result over the buffer size is refused with `capacity_exceeded`, never truncated.
+- **Lighting:** `save` is required. `true` sends the firmware's one save command after the values verify. It saves all lighting, not just this system, and with no other field it makes the current values permanent. `false` lasts until the keyboard loses power. A request cannot mix them. Backlight `effect` is 0 or 1.
 
 ### Macro contents
 
@@ -68,7 +68,7 @@ Keycodes use Vial/QMK names (`KC_A`, `MO(1)`, `LT(2, KC_SPC)`, `LGUI(KC_3)`, `LS
 
 ## The approval contract
 
-`apply` needs `--user-approved`, which states that the user explicitly approved this exact proposal. **The flag is an attestation by the caller. It cannot prove a person consented, and clients must uphold this contract:** show the proposal, wait for explicit approval, and only then pass the flag. New or changed operations need a new proposal. A proposal is single use and expires after 30 minutes.
+`apply` needs `--user-approved`, which states that the user explicitly approved this exact proposal. **The flag is an attestation by the caller. It cannot prove a person consented, and clients must uphold this contract:** show the proposal, wait for explicit approval, and only then pass the flag. New or changed operations need a new proposal. A proposal is single use, whatever the outcome of applying it, and expires after 30 minutes.
 
 Before writing, `apply` takes an OS lock and rechecks identity, protocol versions and the keyboard's configuration against the proposal, refusing if anything changed (`proposal_stale`). Lighting is part of that check only when the proposal changes it, because lighting keys change it at any moment. A write also refuses to start if it would replace a `previous.json` this version cannot read (`invalid_file`); the file is kept, and moving it aside by hand is the way forward. If a physical unlock is needed, it repeats those checks and the expiry check after the keys are released, and locks again if it refuses. It then saves the configuration durably and only then opens the write gate. Once read-back passes, the write stands: a later interruption finishes the backup rotation rather than rolling back.
 
@@ -83,14 +83,14 @@ Before writing, `apply` takes an OS lock and rechecks identity, protocol version
 
 After `partial`, `unknown` or a crash, new plans are refused (`recovery_pending`) until `recover plan` and an approved `apply` resolve it. Nothing writes automatically on startup. Automatic restore runs only inside the failing `apply`, is disclosed in the proposal, and stops if identity is ambiguous, permissions fail, an unlock is needed or 30 seconds pass.
 
-A replug locks the firmware, so a macro write or anything holding `QK_BOOT` that fails with a disconnect cannot be restored automatically: nobody is holding the unlock keys at that point. The outcome is `partial`, the saved state is kept, and `recover plan` produces a proposal whose `apply` asks for the unlock. If that unlock times out, the saved state is still kept and recovery can be retried.
+A replug locks the firmware, so a macro write or anything holding `QK_BOOT` that fails with a disconnect cannot be restored automatically: nobody is holding the unlock keys at that point. The outcome is `partial`, the saved state is kept, and `recover plan` produces a proposal whose `apply` asks for the unlock. If that unlock times out, the saved state is still kept; replug the keyboard and retry.
 
 ### Undo and recovery
 
 - Undo restores every family that differs from the saved previous state, and lists them in its proposal. After it, the replaced configuration becomes the single previous state.
-- **Lighting is the exception:** undo and recovery restore it only if the write being reversed changed it, repeating that write's save choice. Otherwise a difference is probably someone pressing a lighting key, and it is left alone and reported.
+- **Lighting is the exception:** undo and recovery restore only the lighting systems the reversed write changed, repeating that write's save choice. A recovery saves only if the interrupted write got as far as sending its save. Any other difference is probably someone pressing a lighting key, and it is left alone and reported.
 - A family is left out when the firmware no longer has the same entries as the saved state, which can happen when it is rebuilt with the same definition. Undo refuses (`restore_unsupported`). Recovery restores the rest and says so, because refusing would lock the keyboard out of all further plans.
-- Undo and recovery refuse (`device_changed`) if the firmware moved between Vial protocols 5 and 6 since the backup, because saved codes mean something else across that boundary.
+- Undo and recovery refuse (`device_changed`) if the firmware crossed Vial protocol 2, 5 or 6 since the backup, because saved keycodes or macro bytes mean something else across those boundaries. For recovery the message says how to continue: Vialtic keeps the backup, and you move it aside by hand once you have checked the keyboard.
 
 ## Exit codes
 
@@ -132,7 +132,10 @@ Linux: `$XDG_STATE_HOME/vialtic`, falling back to `~/.local/state/vialtic`. macO
 - QMK settings unknown to the pinned Vial tables cannot be written, because their width is unknown. Their raw answers are kept with the backup, and undo reports if one moved, but cannot put it back. Nothing Vialtic sends touches them, so they do not block other writes.
 - The firmware reports only current lighting values and has one save command for all lighting. Vialtic cannot read saved values, cannot tell if current values are saved, and cannot confirm a save reached permanent storage. So undoing a saved lighting change restores and saves the values read just before it; if those were themselves unsaved, they are now saved.
 - Firmware may clamp values, such as a lighting brightness limit. Read-back then fails the apply and the prior values are restored.
-- Cancelling a physical unlock cannot always stop it in firmware. Replug the keyboard if keys stop responding.
+- While a physical unlock is in progress, firmware ignores every command except unlock status and polling, and only ending the unlock or a replug clears it. Every other command, including `lock`, answers `unlock_in_progress`. Cancelling or timing out cannot stop it from the host, so replug the keyboard before retrying.
+- A backup holds what was read from a keyboard identified by model and firmware. If its USB path changed, `undo plan` and `recover plan` refuse (`device_ambiguous`) until you confirm it is the same unit with `--device`.
+- Backlight brightness is a level in firmware (`level = value * levels / 255`), and the number of levels is not reported. Any other value fails read-back and is reported with what the firmware kept. Asking for that reported value works.
+- The firmware treats RGB light effect 0 as off and ignores colour changes while off, so a colour change on an RGB light that stays off fails read-back.
 
 ## Emulator scenarios
 

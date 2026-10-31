@@ -21,13 +21,16 @@ Maps every configuration family in SPEC section 4 to the pinned Vial GUI revisio
 ## Upstream traps and how Vialtic handles them
 
 - **Setters update memory before sending, and several send with no retries.** Vialtic never trusts upstream's in-memory state after a write: it reloads from the keyboard and compares. `GuardedTransport` raises every write packet to the same retry count, because all of them set absolute values.
-- **The firmware silently replaces `QK_BOOT` with `KC_NO` while locked.** Read-back catches it, and any operation whose new value contains `QK_BOOT`, including an entry that only keeps an existing one, declares an unlock in its proposal.
+- **Firmware may silently replace `QK_BOOT` with `KC_NO` while locked.** Upstream unlocks before writing it, and reviewed firmware source (vial-qmk `vial_keycode_firewall`) firewalls it in entries. Read-back catches it either way, and any operation whose new value contains `QK_BOOT`, including an entry that only keeps an existing one, declares an unlock in its proposal.
 - **`KeyOverrideOptions` and `AltRepeatKeyOptions` drop bits they do not name.** Vialtic reads the option byte again without that filter and writes it back untouched.
 - **`macro_deserialize_v2` drops malformed bytes and `ActionText` turns bytes >= 0x80 into two UTF-8 bytes.** Backups and restores use the raw buffer. Editing one macro splices bytes into the raw buffer, so the other macros cannot change.
 - **`restore_macros` truncates to the buffer size without telling anyone.** Vialtic refuses anything that does not fit. The only bytes it ever leaves out are terminators upstream's cleanup adds beyond the end of a buffer that has too few of them, which never existed on the keyboard.
 - **`qmk_settings_set` returns a status byte that callers ignore.** Vialtic treats nonzero as a failed write.
 - **`qmk_settings` reads drop values whose status is nonzero.** Those qsids are reported as unreadable, their coverage as partial, and writes to them are refused.
 - **`set_layout_options` does nothing when the keyboard has no options.** Vialtic refuses earlier with a capability error.
+- **Backlight brightness is stored as a level,** so a reported value can land one level lower when written back. Vialtic writes the next value up when that happens, which always lands on the same level.
+- **RGB light effect 0 turns it off,** after which firmware ignores colour and needs two effect packets to come back on. Vialtic orders and repeats those packets.
+- **During an unlock, firmware honours only id, definition, unlock status, start and poll.** The rest come back echoed, which upstream reads as protocol 0. Vialtic detects the state first and uses a path that reads no configuration for `unlock status` and `unlock poll`.
 
 ## Upstream functions that are not configuration
 

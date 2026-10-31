@@ -94,6 +94,7 @@ class HeadlessKeyboard(Keyboard):
 
     def reload_layout(self, sideload_json=None):
         if sideload_json is None:
+            self._refuse_during_unlock()
             self.reload_via_protocol()
             data = self.usb_send(self.dev, struct.pack("BB", proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_GET_KEYBOARD_ID),
                                  retries=20)
@@ -103,6 +104,15 @@ class HeadlessKeyboard(Keyboard):
             sideload_json = self._fetch_definition()
         super().reload_layout(sideload_json)
         self.sideload = False
+
+    def _refuse_during_unlock(self):
+        """While an unlock runs the firmware echoes almost everything back, which reads as nonsense."""
+        data = self.usb_send(self.dev, struct.pack("BB", proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_GET_UNLOCK_STATUS), retries=20)
+        if data[0] in (0, 1) and data[1] == 1:
+            raise VialticError("unlock_in_progress", "A physical unlock is in progress, and until it ends the firmware ignores "
+                                                     "every other command, including lock.",
+                               next_steps=["Hold the unlock keys and run `vialtic unlock poll` until it finishes, or replug "
+                                           "the keyboard to abandon it."])
 
     def _fetch_definition(self):
         data = self.usb_send(self.dev, struct.pack("BB", proto.CMD_VIA_VIAL_PREFIX, proto.CMD_VIAL_GET_SIZE), retries=20)
@@ -586,8 +596,14 @@ def writable_macro_bytes(buffer: bytes, memory: int) -> bytes:
 
     With too few terminators on the keyboard, upstream's read adds them past the end of the
     memory. Only those are dropped here, and reading the result gives the same buffer back.
+    The rest of the memory is zeroed: firmware never plays it, and a cleared macro's text
+    must not stay on the keyboard, nor a stray last byte that stops every macro playing.
     """
-    return buffer[:memory]
+    return buffer[:memory].ljust(memory, b"\x00")
+
+
+def decode_macro_buffer(text: str) -> bytes:
+    return base64.b64decode(text, validate=True)
 
 
 def macro_preview(segment: bytes, vial_protocol: int) -> list:
@@ -670,19 +686,37 @@ def _alt_repeat_entry(value: AltRepeatKeyValue) -> AltRepeatKeyEntry:
     return entry
 
 
+def _write_backlight_brightness(kb: Keyboard, value: int) -> None:
+    """Firmware keeps a level, computing level = value * levels // 255 and reporting level * 255 // levels.
+
+    So a value it reports can land one level lower when written back, and the next value up always
+    lands right. Only read-back decides whether the result is what was asked for.
+    """
+    kb.set_qmk_backlight_brightness(value)
+    data = kb.usb_send(kb.dev, struct.pack(">BB", proto.CMD_VIA_LIGHTING_GET_VALUE, proto.QMK_BACKLIGHT_BRIGHTNESS), retries=20)
+    if data[2] != value and value < 0xFF:
+        kb.set_qmk_backlight_brightness(value + 1)
+
+
 def _write_lighting(kb: Keyboard, op) -> None:
     """Sets current values only. Saving is a separate step that follows verification."""
     after, changed = op.after, {name for name in op.after if op.after[name] != op.before.get(name)}
     if op.system == "rgblight":
+        # Effect 0 means off, and firmware ignores colour while off. From off, the first effect packet
+        # only turns it on with the old mode, so it takes a second one. Going off, it comes last.
+        turning_on = "effect" in changed and op.before.get("effect") == 0
+        if turning_on:
+            kb.set_qmk_rgblight_effect(after["effect"])
+            kb.set_qmk_rgblight_effect(after["effect"])
         if changed & {"brightness", "hue", "saturation"}:
             kb.set_qmk_rgblight_color(after["hue"], after["saturation"], after["brightness"])
-        if "effect" in changed:
-            kb.set_qmk_rgblight_effect(after["effect"])
         if "effect_speed" in changed:
             kb.set_qmk_rgblight_effect_speed(after["effect_speed"])
+        if "effect" in changed and not turning_on:
+            kb.set_qmk_rgblight_effect(after["effect"])
     elif op.system == "backlight":
         if "brightness" in changed:
-            kb.set_qmk_backlight_brightness(after["brightness"])
+            _write_backlight_brightness(kb, after["brightness"])
         if "effect" in changed:
             kb.set_qmk_backlight_effect(after["effect"])
     else:
@@ -713,11 +747,17 @@ def write_operation(kb: Keyboard, op) -> None:
     elif op.type == "set_macros":
         if kb.get_unlock_status() != 1:
             raise UnlockRequired("the keyboard must be physically unlocked for this write")
-        kb.set_macro(writable_macro_bytes(base64.b64decode(op.after_buffer_b64), kb.macro_memory))
+        kb.set_macro(writable_macro_bytes(decode_macro_buffer(op.after_buffer_b64), kb.macro_memory))
     elif op.type == "set_lighting":
         _write_lighting(kb, op)
     else:
         raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
+
+
+def same_encoding(first: int, second: int) -> bool:
+    """Whether saved values mean the same on both protocols: keycodes change at 6, macro bytes at 2 and 5."""
+    return all((first >= boundary) == (second >= boundary)
+               for boundary in (proto.VIAL_PROTOCOL_ADVANCED_MACROS, proto.VIAL_PROTOCOL_EXT_MACROS, 6))
 
 
 def is_vial_protocol_supported(via: int, vial: int) -> bool:

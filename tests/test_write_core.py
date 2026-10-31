@@ -586,7 +586,7 @@ def test_undo_refuses_across_a_keycode_generation(make_rig):
     firmware.spec = dataclasses.replace(firmware.spec, vial_protocol=5)
     with pytest.raises(VialticError) as error:
         rig.service.create_undo_proposal(None)
-    assert error.value.code == "device_changed" and "encodes keycodes differently" in error.value.message
+    assert error.value.code == "device_changed" and "encodes keycodes or macros differently" in error.value.message
 
 
 def test_undo_warns_about_lighting_it_cannot_restore(rig):

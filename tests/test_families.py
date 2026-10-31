@@ -612,6 +612,8 @@ def test_refused_recovery_unlock_keeps_the_backup_and_the_way_out(tmp_path):
         stuck.apply(recovery)
     assert error.value.code == "unlock_timeout"
     assert stuck.store.pending_path(binding).exists(), "the backup survives a failed unlock"
+    stuck.backend.firmware(0).power_cycle()  # replugging is what ends a stuck unlock
+    stuck.backend.save()
     fine = rig.restart()
     assert fine.apply(fine.service.create_recovery_proposal(None)).outcome == "verified"
 
@@ -688,9 +690,9 @@ def _saved(rig):
 @pytest.mark.parametrize("scenario, change, key, value", [
     ("generic", dict(system="vialrgb", mode=3, speed=7, hue=1, saturation=2, value=64), "mode", 3),
     ("split", dict(system="rgblight", brightness=9, effect=2, effect_speed=3, hue=4, saturation=5), "rgb_brightness", 9),
-    ("legacy", dict(system="backlight", brightness=9, effect=1), "bl_brightness", 9),
+    ("legacy", dict(system="backlight", brightness=170, effect=1), "bl_brightness", 170),
     ("dual", dict(system="rgblight", hue=200), "rgb_h", 200),
-    ("dual", dict(system="backlight", effect=3), "bl_effect", 3),
+    ("dual", dict(system="backlight", effect=1), "bl_effect", 1),
 ])
 def test_lighting_cycle_transient(tmp_path, scenario, change, key, value):
     rig = Rig(tmp_path, scenario)
@@ -874,7 +876,8 @@ def test_old_backup_keeps_its_bytes_until_a_verified_write_replaces_it(tmp_path)
 def test_new_backup_records_what_followed(tmp_path):
     rig, path, _ = _with_old_backup(tmp_path)
     assert rig.apply(rig.plan((1, 0, 2, "KC_A"))).outcome == "verified"
-    assert json.loads(path.read_text())["followed_by"] == {"families": ["keymap"], "lighting_saved": False}
+    assert json.loads(path.read_text())["followed_by"] == {"families": ["keymap"], "lighting_saved": False,
+                                                            "lighting_systems": []}
 
 
 def test_old_backup_does_not_restore_lighting_it_knows_nothing_about(tmp_path):

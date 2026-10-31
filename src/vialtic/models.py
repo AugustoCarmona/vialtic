@@ -194,6 +194,7 @@ class FollowingWrite(Model):
 
     families: list[str] = Field(default_factory=list)
     lighting_saved: bool = False
+    lighting_systems: list[str] = Field(default_factory=list)
 
 
 class Snapshot(Envelope):
@@ -584,6 +585,7 @@ class Journal(Envelope):
     started_at: datetime
     updated_at: datetime
     note: str = ""
+    lighting_save_sent: bool = False
 
 
 # Diagnostics.

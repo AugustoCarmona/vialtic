@@ -141,6 +141,11 @@
       "title": "Kind",
       "type": "string"
     },
+    "lighting_save_sent": {
+      "default": false,
+      "title": "Lighting Save Sent",
+      "type": "boolean"
+    },
     "note": {
       "default": "",
       "title": "Note",

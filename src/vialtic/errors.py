@@ -30,6 +30,7 @@ ERROR_EXIT_CODES: dict[str, int] = {
     "permission_denied": EXIT_PERMISSION,
     "device_busy": EXIT_BUSY,
     "lock_timeout": EXIT_BUSY,
+    "unlock_in_progress": EXIT_BUSY,
     "hid_backend_unavailable": EXIT_UNSUPPORTED,
     "unsupported_protocol": EXIT_UNSUPPORTED,
     "unsupported_operation": EXIT_UNSUPPORTED,

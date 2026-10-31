@@ -373,6 +373,13 @@
           "default": false,
           "title": "Lighting Saved",
           "type": "boolean"
+        },
+        "lighting_systems": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Lighting Systems",
+          "type": "array"
         }
       },
       "title": "FollowingWrite",

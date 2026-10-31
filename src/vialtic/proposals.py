@@ -51,6 +51,10 @@ def touches_lighting(operations: Iterable[Operation]) -> bool:
     return any(op.type == "set_lighting" for op in operations)
 
 
+def touched_lighting_systems(operations: Iterable[Operation]) -> list[str]:
+    return sorted({op.system for op in operations if op.type == "set_lighting"})
+
+
 def saves_lighting(operations: Iterable[Operation]) -> bool:
     return any(op.type == "set_lighting" and op.save for op in operations)
 
@@ -310,6 +314,8 @@ class _Planner:
                                                   f"It takes: {', '.join(fields)}.")
         before = {name: current[name] for name in fields}
         limits = {"mode": U16}
+        if change.system == "backlight":
+            limits["effect"] = 1  # breathing is on or off
         if change.system == "vialrgb":
             limits["value"] = current["maximum_brightness"]
         after = {name: self._bounded(getattr(change, name), before[name], limits.get(name, U8), f"The {name} value")
@@ -321,7 +327,8 @@ class _Planner:
         if len(self.lighting_saves) > 1:
             raise VialticError("invalid_request", "The firmware has one save command for all lighting, so a request cannot "
                                                   "save one lighting system and leave another transient.")
-        if after == before:
+        # Same values with a save is meaningful: it makes transient values permanent.
+        if after == before and not change.save:
             return self._skip(f"{change.system} lighting")
         self.operations.append(SetLightingOperation(system=change.system, before=before, after=after, save=change.save))
         self.warnings.append(LIGHTING_SAVED_NOTE if change.save else LIGHTING_TRANSIENT_NOTE)
@@ -338,7 +345,7 @@ class _Planner:
         if not self.macro_edits:
             return
         macros = self.config.macros
-        before = base64.b64decode(macros.buffer_b64)
+        before = va.decode_macro_buffer(macros.buffer_b64)
         segments = va.macro_segments(before, macros.count)
         for index, data in self.macro_edits.items():
             segments[index] = data
@@ -346,8 +353,9 @@ class _Planner:
         if after == before:
             return self._skip("macros")
         if len(after) > macros.memory_bytes:
-            raise VialticError("capacity_exceeded", f"The macros would need {len(after)} bytes and this keyboard has "
-                                                    f"{macros.memory_bytes}. Nothing was changed.",
+            raise VialticError("capacity_exceeded", f"The macros would need {len(after)} bytes, counting one terminator "
+                                                    f"for each macro, and this keyboard has {macros.memory_bytes}. Nothing "
+                                                    "was changed.",
                                details={"needed_bytes": len(after), "memory_bytes": macros.memory_bytes},
                                next_steps=["Shorten or clear a macro. Vialtic never truncates them."])
         self.operations.append(macro_buffer_operation(before, after, macros.count, macros.memory_bytes, self.kb.vial_protocol))
@@ -423,7 +431,8 @@ def describe_operation(op: Operation) -> str:
     if op.type == "set_qmk_setting":
         return f"QMK setting {op.qsid} ({op.title}): {op.before} -> {op.after}"
     if op.type == "set_lighting":
-        changes = ", ".join(f"{name} {op.before[name]} -> {op.after[name]}" for name in op.after if op.before[name] != op.after[name])
+        changes = ", ".join(f"{name} {op.before[name]} -> {op.after[name]}" for name in op.after
+                            if op.before[name] != op.after[name]) or "no value changes"
         return f"{op.system} lighting: {changes} ({'saved' if op.save else 'until power is lost'})"
     if op.type == "set_macros":
         which = ", ".join(str(item.index) for item in op.changed) or "none (only the raw buffer differs)"
@@ -455,9 +464,10 @@ def _lighting_state(config: Configuration) -> dict[str, dict[str, int]]:
             for system, fields in va.LIGHTING_FIELDS.items() if getattr(light, system)}
 
 
-def family_state(config: Configuration, lighting: bool = False) -> dict[str, dict[str, Any]]:
-    """Lighting is only part of it when a write changes it: keys on the board change it at will."""
-    state = {} if not lighting else {"lighting": _lighting_state(config)}
+def family_state(config: Configuration, lighting: Iterable[str] = ()) -> dict[str, dict[str, Any]]:
+    """Lighting systems are only part of it when named: keys on the board change them at will."""
+    systems = _lighting_state(config)
+    state = {"lighting": {name: systems[name] for name in lighting if name in systems}} if lighting else {}
     return state | {
         "keymap": {f"{e.layer}:{e.row},{e.col}": e.raw for e in config.keymap},
         "encoders": {f"{e.layer}:{e.index}:{e.direction}": e.raw for e in config.encoders},
@@ -508,16 +518,18 @@ def restore_blockers(current: Configuration, target: Configuration) -> list[str]
     macros = target.macros
     if "macros" not in blockers and macros.count and (
             macros.buffer_b64 is None or macros.count != current.macros.count
-            or len(base64.b64decode(macros.buffer_b64)) - macros.count > current.macros.memory_bytes):
+            or len(va.decode_macro_buffer(macros.buffer_b64)) - macros.count > current.macros.memory_bytes):
         blockers.append("macros")
     return blockers
 
 
 def restore_operations(current: Configuration, target: Configuration, vial_protocol: int | None = None,
-                       lighting_save: bool | None = None) -> tuple[list[Operation], list[str], list[str]]:
+                       lighting_save: bool | None = None,
+                       lighting_systems: Iterable[str] = ()) -> tuple[list[Operation], list[str], list[str]]:
     """Operations turning current into target. Also returns unrestorable families and notes.
 
-    `lighting_save` is None when lighting is not part of this restore, otherwise whether to save it.
+    `lighting_systems` are the ones this restore covers, and `lighting_save` whether to save them.
+    Anything else in lighting is left alone, because keys on the board may have changed it.
     """
     ops: list[Operation] = []
     now_keys = {(e.layer, e.row, e.col): e for e in current.keymap}
@@ -564,7 +576,8 @@ def restore_operations(current: Configuration, target: Configuration, vial_proto
 
     if "macros" not in blockers and current.macros.buffer_b64 != target.macros.buffer_b64:
         # Raw bytes, never the parsed form: parsing drops malformed bytes and re-encodes others.
-        ops.append(macro_buffer_operation(base64.b64decode(current.macros.buffer_b64), base64.b64decode(target.macros.buffer_b64),
+        ops.append(macro_buffer_operation(va.decode_macro_buffer(current.macros.buffer_b64),
+                                          va.decode_macro_buffer(target.macros.buffer_b64),
                                           target.macros.count, current.macros.memory_bytes, vial_protocol))
 
     notes = []
@@ -573,18 +586,19 @@ def restore_operations(current: Configuration, target: Configuration, vial_proto
         notes.append(f"QMK settings {moved} are not in the pinned Vial tables and changed since the backup. Vialtic cannot "
                      "restore them; use the software that changed them.")
     now_light, want_light = _lighting_state(current), _lighting_state(target)
-    if lighting_save is None:
-        if now_light != want_light:
-            notes.append("Lighting differs from the saved state and is not restored: the write being reversed did not change "
-                         "it, so the difference is likely lighting keys on the keyboard.")
-    elif set(want_light) - set(now_light):
+    systems = set(lighting_systems)
+    if {name for name in want_light if name in systems} - set(now_light):
         blockers.append("lighting")
-    else:
-        for system, wanted in want_light.items():
-            if now_light[system] != wanted:
-                ops.append(SetLightingOperation(system=system, before=now_light[system], after=wanted, save=lighting_save))
-        if touches_lighting(ops):
-            notes.append(LIGHTING_SAVED_NOTE if lighting_save else LIGHTING_TRANSIENT_NOTE)
+        return ops, blockers, notes
+    if any(now_light.get(name) != values for name, values in want_light.items() if name not in systems):
+        notes.append("Lighting differs from the saved state and is not restored: the write being reversed did not change "
+                     "it, so the difference is likely lighting keys on the keyboard.")
+    for system, wanted in want_light.items():
+        # A save is written even with equal values: the saved values may be the ones to replace.
+        if system in systems and (now_light[system] != wanted or lighting_save):
+            ops.append(SetLightingOperation(system=system, before=now_light[system], after=wanted, save=bool(lighting_save)))
+    if touches_lighting(ops):
+        notes.append(LIGHTING_SAVED_NOTE if lighting_save else LIGHTING_TRANSIENT_NOTE)
     return ops, blockers, notes
 
 
@@ -619,9 +633,32 @@ def _content(proposal: Proposal) -> dict:
 
 
 def check_integrity(proposal: Proposal) -> None:
+    tampered = VialticError("proposal_tampered", f"Stored proposal {proposal.id} no longer matches its id or its own "
+                                                 "operations; it was edited.",
+                            next_steps=["Create a new proposal and get it approved."])
     if proposal_id(_content(proposal)) != proposal.id:
-        raise VialticError("proposal_tampered", f"Stored proposal {proposal.id} no longer matches its id; it was edited.",
-                           next_steps=["Create a new proposal and get it approved."])
+        raise tampered
+    # An id can be recomputed, so a proposal must also keep the guarantees every real one has.
+    if set(va.CHECKED_FAMILIES) - set(proposal.baseline.checked_families) \
+            or set(proposal.baseline.checked_families) - set(proposal.baseline.family_fingerprints) \
+            or (touches_lighting(proposal.operations) and "lighting" not in proposal.baseline.checked_families) \
+            or proposal.affected != affected_families(proposal.operations):
+        raise tampered
+
+
+def check_stated_values(proposal: Proposal, kb: Any) -> None:
+    """What a proposal shows must be what it writes. Needs the keyboard's keycode tables active."""
+    for op in proposal.operations:
+        for value in after_keycodes(op):
+            if value != va.to_value(value.keycode) or value.raw != va.Keycode.deserialize(value.keycode, reraise=True):
+                raise VialticError("proposal_stale", "A keycode in this proposal resolves differently now.")
+        if op.type == "set_macros":
+            restated = macro_buffer_operation(va.decode_macro_buffer(op.before_buffer_b64),
+                                              va.decode_macro_buffer(op.after_buffer_b64), kb.macro_count, op.memory_bytes,
+                                              kb.vial_protocol)
+            if restated != op:
+                raise VialticError("proposal_tampered", f"The macro preview in proposal {proposal.id} is not what it writes.",
+                                   next_steps=["Create a new proposal and get it approved."])
 
 
 def unexplained_values(baseline: Configuration, operations: Iterable[Operation],
@@ -649,15 +686,15 @@ def unexplained_values(baseline: Configuration, operations: Iterable[Operation],
 
 
 def compare_state(baseline: Configuration, operations: Iterable[Operation], observed: Configuration,
-                  skip_families: Iterable[str] = (), check_lighting: bool = False) -> list[VerificationDifference]:
+                  skip_families: Iterable[str] = (), lighting_systems: Iterable[str] = ()) -> list[VerificationDifference]:
     """Differences between the observed configuration and baseline plus operations."""
     operations = list(operations)
-    check_lighting = check_lighting or touches_lighting(operations)
-    expected = family_state(baseline, lighting=check_lighting)
+    systems = sorted(set(lighting_systems) | set(touched_lighting_systems(operations)))
+    expected = family_state(baseline, lighting=systems)
     for op in operations:
         family, target, _, after = operation_effect(op)
         expected[family][target] = after
-    seen = family_state(observed, lighting=check_lighting)
+    seen = family_state(observed, lighting=systems)
     diffs: list[VerificationDifference] = []
     for family, values in expected.items():
         if family in skip_families:

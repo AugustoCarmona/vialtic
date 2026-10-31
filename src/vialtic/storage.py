@@ -60,12 +60,16 @@ def _ensure_dir(path: pathlib.Path) -> pathlib.Path:
     return path
 
 
-def atomic_write(path: pathlib.Path, data: bytes) -> None:
-    """Write durably: temp file in the same directory, fsync, rename, fsync directory."""
+def atomic_write(path: pathlib.Path, data: bytes, own_directory: bool = True) -> None:
+    """Write durably: temp file in the same directory, fsync, rename, fsync directory.
+
+    `own_directory` is false for paths a user chose, where a similarly named file is theirs.
+    """
     _ensure_dir(path.parent)
     # A process killed mid-write leaves its temp file, possibly a full snapshot, behind.
-    for stale in path.parent.glob(f".{path.name}.*"):
-        stale.unlink(missing_ok=True)
+    if own_directory:
+        for stale in path.parent.glob(f".{path.name}.*"):
+            stale.unlink(missing_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "wb") as out:
