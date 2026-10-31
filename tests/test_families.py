@@ -9,7 +9,7 @@ from conftest import Rig
 from vialtic import proposals
 from vialtic.emulator import Faults
 from vialtic.errors import VialticError
-from vialtic.models import ChangeSet, SetKeyChange, SetLayoutOptionChange, SetTapDanceChange
+from vialtic.models import ChangeSet, SetComboChange, SetKeyChange, SetLayoutOptionChange, SetTapDanceChange
 from vialtic.service import attestation_for
 
 
@@ -177,3 +177,53 @@ def test_tap_dance_lost_write_restores(tmp_path):
     result = rig.apply(proposal)
     assert result.outcome == "partial", "a lost write also blocks the restore"
     assert rig.store.has_unresolved_write(proposal.device.binding_id)
+
+
+# Combos.
+
+def test_combo_cycle(tmp_path):
+    rig = full(tmp_path)
+    proposal = plan(rig, SetComboChange(index=1, keys=["KC_A", "KC_B"], output="LCTL(KC_C)"))
+    op = proposal.operations[0]
+    assert [k.keycode for k in op.after.keys] == ["KC_A", "KC_B", "KC_NO", "KC_NO"] and op.after.output.keycode == "LCTL(KC_C)"
+    assert "=> LCTL(KC_C)" in proposals.describe_operation(op)
+    check_family_cycle(rig, proposal, lambda: list(firmware(rig).state["combos"][1]), "combos")
+
+
+def test_combo_partial_change_keeps_the_rest(tmp_path):
+    rig = full(tmp_path)
+    assert rig.apply(plan(rig, SetComboChange(index=0, keys=["KC_A", "KC_B", "KC_C", "KC_D"], output="KC_E"))).outcome == "verified"
+    assert rig.apply(plan(rig, SetComboChange(index=0, output="KC_F"))).outcome == "verified"
+    assert firmware(rig).state["combos"][0] == [4, 5, 6, 7, 9]
+
+
+@pytest.mark.parametrize("change, code", [
+    (dict(index=2, output="KC_A"), "invalid_coordinate"), (dict(index=0, keys=["KC_NOPE"]), "invalid_keycode"),
+    (dict(index=0, output="MO(9)"), "invalid_layer_reference"),
+])
+def test_combo_bounds(tmp_path, change, code):
+    refused(full(tmp_path), code, SetComboChange(**change))
+
+
+def test_combo_rejects_too_many_inputs():
+    with pytest.raises(ValueError):
+        SetComboChange(index=0, keys=["KC_A"] * 5)
+
+
+def test_combo_gap_warns(tmp_path):
+    rig = full(tmp_path)
+    assert any("KC_NO before another input" in w for w in plan(rig, SetComboChange(index=0, keys=["KC_NO", "KC_A"])).warnings)
+
+
+def test_combo_without_capability(tmp_path):
+    assert refused(Rig(tmp_path, "minimal"), "capability_unavailable", SetComboChange(index=0, output="KC_A")).details["family"] == "combos"
+
+
+def test_combo_boot_output_needs_unlock(tmp_path):
+    rig = full(tmp_path)
+    proposal = plan(rig, SetComboChange(index=0, keys=["KC_A", "KC_B"], output="QK_BOOT"))
+    assert proposal.unlock.required
+    assert rig.apply(proposal).outcome == "verified" and firmware(rig).state["combos"][0][4] == firmware(rig).boot_code
+    undo(rig)
+    assert firmware(rig).state["combos"][0][4] == 0
+    assert rig.service.create_undo_proposal(None).unlock.required, "restoring QK_BOOT needs the same unlock"

@@ -1,5 +1,54 @@
 {
   "$defs": {
+    "SetComboChange": {
+      "additionalProperties": false,
+      "description": "Change one combo. `keys` lists up to four inputs and replaces all of them. Fields left out keep their value.",
+      "properties": {
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "keys": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keys"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output"
+        },
+        "type": {
+          "const": "set_combo",
+          "default": "set_combo",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index"
+      ],
+      "title": "SetComboChange",
+      "type": "object"
+    },
     "SetEncoderChange": {
       "additionalProperties": false,
       "properties": {
@@ -184,6 +233,7 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "set_combo": "#/$defs/SetComboChange",
             "set_encoder": "#/$defs/SetEncoderChange",
             "set_key": "#/$defs/SetKeyChange",
             "set_layout_option": "#/$defs/SetLayoutOptionChange",
@@ -203,6 +253,9 @@
           },
           {
             "$ref": "#/$defs/SetTapDanceChange"
+          },
+          {
+            "$ref": "#/$defs/SetComboChange"
           }
         ]
       },

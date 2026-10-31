@@ -25,6 +25,27 @@
       "title": "Baseline",
       "type": "object"
     },
+    "ComboValue": {
+      "additionalProperties": false,
+      "properties": {
+        "keys": {
+          "items": {
+            "$ref": "#/$defs/KeycodeValue"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
+        "output": {
+          "$ref": "#/$defs/KeycodeValue"
+        }
+      },
+      "required": [
+        "keys",
+        "output"
+      ],
+      "title": "ComboValue",
+      "type": "object"
+    },
     "DeviceIdentity": {
       "additionalProperties": false,
       "description": "How a keyboard was recognized. `device_id` only selects it for this plug session.",
@@ -189,6 +210,34 @@
         "required"
       ],
       "title": "ProposalUnlock",
+      "type": "object"
+    },
+    "SetComboOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/ComboValue"
+        },
+        "before": {
+          "$ref": "#/$defs/ComboValue"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_combo",
+          "default": "set_combo",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "before",
+        "after"
+      ],
+      "title": "SetComboOperation",
       "type": "object"
     },
     "SetEncoderOperation": {
@@ -423,6 +472,7 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "set_combo": "#/$defs/SetComboOperation",
             "set_encoder": "#/$defs/SetEncoderOperation",
             "set_key": "#/$defs/SetKeyOperation",
             "set_layout_options": "#/$defs/SetLayoutOptionsOperation",
@@ -442,6 +492,9 @@
           },
           {
             "$ref": "#/$defs/SetTapDanceOperation"
+          },
+          {
+            "$ref": "#/$defs/SetComboOperation"
           }
         ]
       },

@@ -271,7 +271,16 @@ class SetTapDanceChange(Model):
     tapping_term: int | None = None
 
 
-Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange, SetTapDanceChange],
+class SetComboChange(Model):
+    """Change one combo. `keys` lists up to four inputs and replaces all of them. Fields left out keep their value."""
+
+    type: Literal["set_combo"] = "set_combo"
+    index: int
+    keys: list[str] | None = Field(default=None, max_length=4)
+    output: str | None = None
+
+
+Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange, SetTapDanceChange, SetComboChange],
                    Field(discriminator="type")]
 
 
@@ -323,8 +332,20 @@ class SetTapDanceOperation(Model):
     after: TapDanceValue
 
 
-Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation, SetLayoutOptionsOperation, SetTapDanceOperation],
-                      Field(discriminator="type")]
+class ComboValue(Model):
+    keys: list[KeycodeValue]
+    output: KeycodeValue
+
+
+class SetComboOperation(Model):
+    type: Literal["set_combo"] = "set_combo"
+    index: int
+    before: ComboValue
+    after: ComboValue
+
+
+Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation, SetLayoutOptionsOperation, SetTapDanceOperation,
+                            SetComboOperation], Field(discriminator="type")]
 
 
 class Baseline(Model):

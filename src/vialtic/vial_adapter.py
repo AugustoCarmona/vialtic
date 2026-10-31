@@ -20,7 +20,7 @@ import threading
 
 from .errors import VialticError
 from .models import (
-    Capabilities, Configuration, EncoderEntry, KeyGeometry, KeycodeInfo, KeycodeValue, KeymapEntry,
+    Capabilities, ComboValue, Configuration, EncoderEntry, KeyGeometry, KeycodeInfo, KeycodeValue, KeymapEntry,
     LayoutGeometry, LightingState, MacroState, SettingsState, TapDanceValue,
 )
 
@@ -79,7 +79,7 @@ CHECKED_FAMILIES = [
     "key_overrides", "alt_repeat_keys", "settings",
 ]
 ALL_FAMILIES = CHECKED_FAMILIES + ["lighting"]
-RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options", "tap_dance"}
+RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options", "tap_dance", "combos"}
 
 
 class HeadlessKeyboard(Keyboard):
@@ -401,7 +401,7 @@ def lighting_kind(kb: Keyboard) -> str:
 def writable_operations(kb: Keyboard) -> list[str]:
     """Operations this keyboard can take; a family it lacks is not offered."""
     available = {"set_key": True, "set_encoder": bool(kb.encoder_count), "set_layout_option": bool(kb.layout_labels),
-                 "set_tap_dance": bool(kb.tap_dance_count)}
+                 "set_tap_dance": bool(kb.tap_dance_count), "set_combo": bool(kb.combo_count)}
     return [name for name, present in available.items() if present]
 
 
@@ -488,6 +488,14 @@ def tap_dance_wire(value: TapDanceValue) -> tuple:
             value.tapping_term)
 
 
+def combo_value(entry) -> ComboValue:
+    return ComboValue(keys=[to_value(code) for code in entry[:4]], output=to_value(entry[4]))
+
+
+def combo_wire(value: ComboValue) -> tuple:
+    return (*(key.keycode for key in value.keys), value.output.keycode)
+
+
 def write_operation(kb: Keyboard, op) -> None:
     if op.type == "set_key":
         kb.set_key(op.layer, op.row, op.col, op.after.keycode)
@@ -497,6 +505,8 @@ def write_operation(kb: Keyboard, op) -> None:
         kb.set_layout_options(op.after)
     elif op.type == "set_tap_dance":
         kb.tap_dance_set(op.index, tap_dance_wire(op.after))
+    elif op.type == "set_combo":
+        kb.combo_set(op.index, combo_wire(op.after))
     else:
         raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 

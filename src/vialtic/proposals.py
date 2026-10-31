@@ -10,7 +10,7 @@ from . import vial_adapter as va
 from .device import Session, canonical_json
 from .errors import VialticError
 from .models import (
-    Baseline, Change, Configuration, TapDanceValue, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
+    Baseline, Change, ComboValue, Configuration, SetComboChange, SetComboOperation, TapDanceValue, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
     ProposalType, ProposalUnlock, SetEncoderChange, SetEncoderOperation, SetKeyChange, SetKeyOperation,
     SetLayoutOptionChange, SetLayoutOptionsOperation, SetTapDanceChange, SetTapDanceOperation, Snapshot, UnlockPosition,
     VerificationDifference,
@@ -28,7 +28,7 @@ RECOVERY_TEXT = ("Everything Vialtic can read from the keyboard is saved before 
                  "recovery command is reported.")
 
 FAMILY_OF_OPERATION = {"set_key": "keymap", "set_encoder": "encoders", "set_layout_options": "layout_options",
-                       "set_tap_dance": "tap_dance"}
+                       "set_tap_dance": "tap_dance", "set_combo": "combos"}
 U16 = 0xFFFF
 
 
@@ -42,6 +42,8 @@ def after_keycodes(op: Operation) -> list[KeycodeValue]:
         return [op.after]
     if op.type == "set_tap_dance":
         return [op.after.on_tap, op.after.on_hold, op.after.on_double_tap, op.after.on_tap_hold]
+    if op.type == "set_combo":
+        return [*op.after.keys, op.after.output]
     return []
 
 
@@ -162,6 +164,24 @@ class _Planner:
             return self._skip(f"tap dance {change.index}")
         self.operations.append(SetTapDanceOperation(index=change.index, before=before, after=after))
 
+    def _set_combo(self, change: SetComboChange) -> None:
+        _capability(self.kb.combo_count, "combos", "combos")
+        self._index(change.index, self.kb.combo_count, "Combo")
+        self._once(("combo", change.index), f"combo {change.index}")
+        before = va.combo_value(self.config.combos[change.index])
+        keys = before.keys
+        if change.keys is not None:
+            keys = [self._keycode(text) for text in change.keys]
+            keys += [va.to_value("KC_NO")] * (4 - len(keys))
+        after = ComboValue(keys=keys, output=self._merged_keycode(change.output, before.output))
+        if after == before:
+            return self._skip(f"combo {change.index}")
+        raws = [key.raw for key in keys]
+        if 0 in raws and any(raws[raws.index(0):]):
+            self.warnings.append(f"Combo {change.index} has KC_NO before another input. Firmware stops reading inputs at "
+                                 "the first KC_NO, so the ones after it may be ignored.")
+        self.operations.append(SetComboOperation(index=change.index, before=before, after=after))
+
     def finish(self) -> tuple[list[Operation], list[str]]:
         before = self.config.layout_options
         if self.layout_value is not None:
@@ -194,6 +214,9 @@ def describe_operation(op: Operation) -> str:
         return f"layout options: {op.before} {op.before_choices} -> {op.after} {op.after_choices}"
     if op.type == "set_tap_dance":
         return f"tap dance {op.index}: {_changed_fields(op.before, op.after)}"
+    if op.type == "set_combo":
+        keys = [key.keycode for key in op.before.keys], [key.keycode for key in op.after.keys]
+        return f"combo {op.index}: {keys[0]} => {op.before.output.keycode} -> {keys[1]} => {op.after.output.keycode}"
     raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 
 
@@ -216,6 +239,7 @@ def family_state(config: Configuration) -> dict[str, dict[str, Any]]:
         "encoders": {f"{e.layer}:{e.index}:{e.direction}": e.raw for e in config.encoders},
         "layout_options": {"value": config.layout_options},
         "tap_dance": {str(i): list(e) for i, e in enumerate(config.tap_dance)},
+        "combos": {str(i): list(e) for i, e in enumerate(config.combos)},
     }
 
 
@@ -229,6 +253,8 @@ def operation_effect(op: Operation) -> tuple[str, str, Any, Any]:
         return "layout_options", "value", op.before, op.after
     if op.type == "set_tap_dance":
         return "tap_dance", str(op.index), list(va.tap_dance_wire(op.before)), list(va.tap_dance_wire(op.after))
+    if op.type == "set_combo":
+        return "combos", str(op.index), list(va.combo_wire(op.before)), list(va.combo_wire(op.after))
     raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 
 
@@ -265,6 +291,10 @@ def restore_operations(current: Configuration, target: Configuration) -> tuple[l
             if list(have_td) != list(want_td):
                 ops.append(SetTapDanceOperation(index=index, before=va.tap_dance_value(have_td),
                                                 after=va.tap_dance_value(want_td)))
+    if "combos" not in blockers:
+        for index, (have_combo, want_combo) in enumerate(zip(current.combos, target.combos)):
+            if list(have_combo) != list(want_combo):
+                ops.append(SetComboOperation(index=index, before=va.combo_value(have_combo), after=va.combo_value(want_combo)))
 
     now_data, target_data = current.model_dump(mode="json"), target.model_dump(mode="json")
     blockers += [f for f in va.CHECKED_FAMILIES
