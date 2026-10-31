@@ -259,7 +259,20 @@ class SetLayoutOptionChange(Model):
     choice: int
 
 
-Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange], Field(discriminator="type")]
+class SetTapDanceChange(Model):
+    """Change one tap dance entry. Fields left out keep their current value."""
+
+    type: Literal["set_tap_dance"] = "set_tap_dance"
+    index: int
+    on_tap: str | None = None
+    on_hold: str | None = None
+    on_double_tap: str | None = None
+    on_tap_hold: str | None = None
+    tapping_term: int | None = None
+
+
+Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange, SetTapDanceChange],
+                   Field(discriminator="type")]
 
 
 class ChangeSet(Envelope):
@@ -295,7 +308,23 @@ class SetLayoutOptionsOperation(Model):
     after_choices: list[int] = Field(default_factory=list)
 
 
-Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation, SetLayoutOptionsOperation], Field(discriminator="type")]
+class TapDanceValue(Model):
+    on_tap: KeycodeValue
+    on_hold: KeycodeValue
+    on_double_tap: KeycodeValue
+    on_tap_hold: KeycodeValue
+    tapping_term: int
+
+
+class SetTapDanceOperation(Model):
+    type: Literal["set_tap_dance"] = "set_tap_dance"
+    index: int
+    before: TapDanceValue
+    after: TapDanceValue
+
+
+Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation, SetLayoutOptionsOperation, SetTapDanceOperation],
+                      Field(discriminator="type")]
 
 
 class Baseline(Model):

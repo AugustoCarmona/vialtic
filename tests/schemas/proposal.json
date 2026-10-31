@@ -306,6 +306,64 @@
       "title": "SetLayoutOptionsOperation",
       "type": "object"
     },
+    "SetTapDanceOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/TapDanceValue"
+        },
+        "before": {
+          "$ref": "#/$defs/TapDanceValue"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_tap_dance",
+          "default": "set_tap_dance",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "before",
+        "after"
+      ],
+      "title": "SetTapDanceOperation",
+      "type": "object"
+    },
+    "TapDanceValue": {
+      "additionalProperties": false,
+      "properties": {
+        "on_double_tap": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "on_hold": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "on_tap": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "on_tap_hold": {
+          "$ref": "#/$defs/KeycodeValue"
+        },
+        "tapping_term": {
+          "title": "Tapping Term",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "on_tap",
+        "on_hold",
+        "on_double_tap",
+        "on_tap_hold",
+        "tapping_term"
+      ],
+      "title": "TapDanceValue",
+      "type": "object"
+    },
     "UnlockPosition": {
       "additionalProperties": false,
       "properties": {
@@ -367,7 +425,8 @@
           "mapping": {
             "set_encoder": "#/$defs/SetEncoderOperation",
             "set_key": "#/$defs/SetKeyOperation",
-            "set_layout_options": "#/$defs/SetLayoutOptionsOperation"
+            "set_layout_options": "#/$defs/SetLayoutOptionsOperation",
+            "set_tap_dance": "#/$defs/SetTapDanceOperation"
           },
           "propertyName": "type"
         },
@@ -380,6 +439,9 @@
           },
           {
             "$ref": "#/$defs/SetLayoutOptionsOperation"
+          },
+          {
+            "$ref": "#/$defs/SetTapDanceOperation"
           }
         ]
       },

@@ -21,7 +21,7 @@ import threading
 from .errors import VialticError
 from .models import (
     Capabilities, Configuration, EncoderEntry, KeyGeometry, KeycodeInfo, KeycodeValue, KeymapEntry,
-    LayoutGeometry, LightingState, MacroState, SettingsState,
+    LayoutGeometry, LightingState, MacroState, SettingsState, TapDanceValue,
 )
 
 VIAL_GUI_REVISION = "aef8222a2d0429a183b2ed692d5f9efcfd383f08"
@@ -79,7 +79,7 @@ CHECKED_FAMILIES = [
     "key_overrides", "alt_repeat_keys", "settings",
 ]
 ALL_FAMILIES = CHECKED_FAMILIES + ["lighting"]
-RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options"}
+RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options", "tap_dance"}
 
 
 class HeadlessKeyboard(Keyboard):
@@ -400,7 +400,8 @@ def lighting_kind(kb: Keyboard) -> str:
 
 def writable_operations(kb: Keyboard) -> list[str]:
     """Operations this keyboard can take; a family it lacks is not offered."""
-    available = {"set_key": True, "set_encoder": bool(kb.encoder_count), "set_layout_option": bool(kb.layout_labels)}
+    available = {"set_key": True, "set_encoder": bool(kb.encoder_count), "set_layout_option": bool(kb.layout_labels),
+                 "set_tap_dance": bool(kb.tap_dance_count)}
     return [name for name, present in available.items() if present]
 
 
@@ -476,6 +477,17 @@ def coverage_of(kb: Keyboard, config: Configuration) -> dict[str, str]:
 # Writes. Upstream's setters update their in-memory copy before sending and some ignore the
 # outcome, so callers must prove every write by reloading from the keyboard.
 
+def tap_dance_value(entry) -> TapDanceValue:
+    return TapDanceValue(on_tap=to_value(entry[0]), on_hold=to_value(entry[1]), on_double_tap=to_value(entry[2]),
+                         on_tap_hold=to_value(entry[3]), tapping_term=entry[4])
+
+
+def tap_dance_wire(value: TapDanceValue) -> tuple:
+    """The form upstream keeps entries in, which is also what snapshots hold."""
+    return (value.on_tap.keycode, value.on_hold.keycode, value.on_double_tap.keycode, value.on_tap_hold.keycode,
+            value.tapping_term)
+
+
 def write_operation(kb: Keyboard, op) -> None:
     if op.type == "set_key":
         kb.set_key(op.layer, op.row, op.col, op.after.keycode)
@@ -483,6 +495,8 @@ def write_operation(kb: Keyboard, op) -> None:
         kb.set_encoder(op.layer, op.index, op.direction, op.after.keycode)
     elif op.type == "set_layout_options":
         kb.set_layout_options(op.after)
+    elif op.type == "set_tap_dance":
+        kb.tap_dance_set(op.index, tap_dance_wire(op.after))
     else:
         raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 

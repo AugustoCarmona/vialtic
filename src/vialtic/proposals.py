@@ -10,9 +10,10 @@ from . import vial_adapter as va
 from .device import Session, canonical_json
 from .errors import VialticError
 from .models import (
-    Baseline, Change, Configuration, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
+    Baseline, Change, Configuration, TapDanceValue, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
     ProposalType, ProposalUnlock, SetEncoderChange, SetEncoderOperation, SetKeyChange, SetKeyOperation,
-    SetLayoutOptionChange, SetLayoutOptionsOperation, Snapshot, UnlockPosition, VerificationDifference,
+    SetLayoutOptionChange, SetLayoutOptionsOperation, SetTapDanceChange, SetTapDanceOperation, Snapshot, UnlockPosition,
+    VerificationDifference,
 )
 
 DEFAULT_TTL = timedelta(minutes=30)
@@ -26,7 +27,9 @@ RECOVERY_TEXT = ("Everything Vialtic can read from the keyboard is saved before 
                  "within the reconnect window, without further approval. If it cannot, the backup is kept and the exact "
                  "recovery command is reported.")
 
-FAMILY_OF_OPERATION = {"set_key": "keymap", "set_encoder": "encoders", "set_layout_options": "layout_options"}
+FAMILY_OF_OPERATION = {"set_key": "keymap", "set_encoder": "encoders", "set_layout_options": "layout_options",
+                       "set_tap_dance": "tap_dance"}
+U16 = 0xFFFF
 
 
 def _value(entry: KeymapEntry | EncoderEntry) -> KeycodeValue:
@@ -37,6 +40,8 @@ def after_keycodes(op: Operation) -> list[KeycodeValue]:
     """Every keycode an operation writes, including ones an entry merely keeps."""
     if op.type in ("set_key", "set_encoder"):
         return [op.after]
+    if op.type == "set_tap_dance":
+        return [op.after.on_tap, op.after.on_hold, op.after.on_double_tap, op.after.on_tap_hold]
     return []
 
 
@@ -132,6 +137,31 @@ class _Planner:
         current = self.config.layout_options if self.layout_value is None else self.layout_value
         self.layout_value = va.set_layout_choice(labels, current, change.index, change.choice)
 
+    def _merged_keycode(self, text: str | None, current: KeycodeValue) -> KeycodeValue:
+        """A field left out keeps its value, even one a request could not set itself."""
+        return current if text is None else self._keycode(text)
+
+    def _bounded(self, value: int | None, current: int, limit: int, what: str) -> int:
+        if value is None:
+            return current
+        if isinstance(value, bool) or not 0 <= value <= limit:
+            raise VialticError("invalid_request", f"{what} must be between 0 and {limit}, not {value}.")
+        return value
+
+    def _set_tap_dance(self, change: SetTapDanceChange) -> None:
+        _capability(self.kb.tap_dance_count, "tap_dance", "tap dance")
+        self._index(change.index, self.kb.tap_dance_count, "Tap dance entry")
+        self._once(("tap_dance", change.index), f"tap dance {change.index}")
+        before = va.tap_dance_value(self.config.tap_dance[change.index])
+        after = TapDanceValue(on_tap=self._merged_keycode(change.on_tap, before.on_tap),
+                              on_hold=self._merged_keycode(change.on_hold, before.on_hold),
+                              on_double_tap=self._merged_keycode(change.on_double_tap, before.on_double_tap),
+                              on_tap_hold=self._merged_keycode(change.on_tap_hold, before.on_tap_hold),
+                              tapping_term=self._bounded(change.tapping_term, before.tapping_term, U16, "The tapping term"))
+        if after == before:
+            return self._skip(f"tap dance {change.index}")
+        self.operations.append(SetTapDanceOperation(index=change.index, before=before, after=after))
+
     def finish(self) -> tuple[list[Operation], list[str]]:
         before = self.config.layout_options
         if self.layout_value is not None:
@@ -162,7 +192,19 @@ def describe_operation(op: Operation) -> str:
         return f"layer {op.layer} encoder {op.index} direction {op.direction}: {op.before.keycode} -> {op.after.keycode}"
     if op.type == "set_layout_options":
         return f"layout options: {op.before} {op.before_choices} -> {op.after} {op.after_choices}"
+    if op.type == "set_tap_dance":
+        return f"tap dance {op.index}: {_changed_fields(op.before, op.after)}"
     raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
+
+
+def _changed_fields(before: Any, after: Any) -> str:
+    """Field by field differences of an entry, showing keycodes by name."""
+    def shown(value: Any) -> Any:
+        return value.keycode if isinstance(value, KeycodeValue) else value
+
+    parts = [f"{name} {shown(getattr(before, name))} -> {shown(getattr(after, name))}"
+             for name in type(before).model_fields if getattr(before, name) != getattr(after, name)]
+    return ", ".join(parts) or "no field changes"
 
 
 # Comparable state. Values are what each family reads back as: raw codes for keys and encoders,
@@ -173,6 +215,7 @@ def family_state(config: Configuration) -> dict[str, dict[str, Any]]:
         "keymap": {f"{e.layer}:{e.row},{e.col}": e.raw for e in config.keymap},
         "encoders": {f"{e.layer}:{e.index}:{e.direction}": e.raw for e in config.encoders},
         "layout_options": {"value": config.layout_options},
+        "tap_dance": {str(i): list(e) for i, e in enumerate(config.tap_dance)},
     }
 
 
@@ -184,6 +227,8 @@ def operation_effect(op: Operation) -> tuple[str, str, Any, Any]:
         return "encoders", f"{op.layer}:{op.index}:{op.direction}", op.before.raw, op.after.raw
     if op.type == "set_layout_options":
         return "layout_options", "value", op.before, op.after
+    if op.type == "set_tap_dance":
+        return "tap_dance", str(op.index), list(va.tap_dance_wire(op.before)), list(va.tap_dance_wire(op.after))
     raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 
 
@@ -215,6 +260,11 @@ def restore_operations(current: Configuration, target: Configuration) -> tuple[l
     blockers = restore_blockers(current, target)
     if "layout_options" not in blockers and current.layout_options != target.layout_options:
         ops.append(SetLayoutOptionsOperation(before=current.layout_options, after=target.layout_options))
+    if "tap_dance" not in blockers:
+        for index, (have_td, want_td) in enumerate(zip(current.tap_dance, target.tap_dance)):
+            if list(have_td) != list(want_td):
+                ops.append(SetTapDanceOperation(index=index, before=va.tap_dance_value(have_td),
+                                                after=va.tap_dance_value(want_td)))
 
     now_data, target_data = current.model_dump(mode="json"), target.model_dump(mode="json")
     blockers += [f for f in va.CHECKED_FAMILIES

@@ -95,6 +95,87 @@
       ],
       "title": "SetLayoutOptionChange",
       "type": "object"
+    },
+    "SetTapDanceChange": {
+      "additionalProperties": false,
+      "description": "Change one tap dance entry. Fields left out keep their current value.",
+      "properties": {
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "on_double_tap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Double Tap"
+        },
+        "on_hold": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Hold"
+        },
+        "on_tap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Tap"
+        },
+        "on_tap_hold": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Tap Hold"
+        },
+        "tapping_term": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tapping Term"
+        },
+        "type": {
+          "const": "set_tap_dance",
+          "default": "set_tap_dance",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index"
+      ],
+      "title": "SetTapDanceChange",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -105,7 +186,8 @@
           "mapping": {
             "set_encoder": "#/$defs/SetEncoderChange",
             "set_key": "#/$defs/SetKeyChange",
-            "set_layout_option": "#/$defs/SetLayoutOptionChange"
+            "set_layout_option": "#/$defs/SetLayoutOptionChange",
+            "set_tap_dance": "#/$defs/SetTapDanceChange"
           },
           "propertyName": "type"
         },
@@ -118,6 +200,9 @@
           },
           {
             "$ref": "#/$defs/SetLayoutOptionChange"
+          },
+          {
+            "$ref": "#/$defs/SetTapDanceChange"
           }
         ]
       },

@@ -263,17 +263,23 @@ class VialticService:
     def _restore_plan(self, current: Snapshot, target: Snapshot, purpose: str) -> tuple[list[Operation], list[str]]:
         if target.device.binding_id != current.device.binding_id:
             raise VialticError("device_changed", "The saved configuration belongs to a different keyboard or firmware.")
+        # The binding does not cover firmware updates, and saved codes mean something else across this boundary.
+        if (target.device.vial_protocol >= 6) != (current.device.vial_protocol >= 6):
+            raise VialticError("device_changed", f"The saved configuration was read from Vial protocol "
+                                                 f"{target.device.vial_protocol} and this keyboard now reports "
+                                                 f"{current.device.vial_protocol}, which encodes keycodes differently.",
+                               next_steps=["Create a new proposal for the changes you want."])
         operations, blockers, notes = proposals.restore_operations(current.configuration, target.configuration)
         if blockers and purpose == "recovery":
             # Refusing here would leave the keyboard unable to accept any new plan.
-            notes.append(f"{', '.join(blockers)} changed since the interrupted write. This build cannot write them, so "
-                         "they stay as they are now; only the keymap and encoders are restored.")
+            notes.append(f"The firmware no longer has the same entries for {', '.join(blockers)} as the saved state, so "
+                         "they cannot be restored and stay as they are now. Everything else is restored.")
         elif blockers:
             raise VialticError(
                 "restore_unsupported",
-                f"This {purpose} would need to restore {', '.join(blockers)}, and this build can only write the keymap "
-                "and encoders. Nothing was changed.",
-                details={"families": blockers}, next_steps=["Restore those features with Vial, or wait for milestone M3."])
+                f"This {purpose} would need to restore {', '.join(blockers)}, and the firmware no longer has the same "
+                "entries as the saved state. Nothing was changed.",
+                details={"families": blockers}, next_steps=["Inspect the keyboard and create a new proposal instead."])
         return operations, notes
 
     def _finish_proposal(self, proposal_type: ProposalType, session: Session, entries: list[DeviceEntry],
@@ -491,8 +497,7 @@ class VialticService:
             if not pending.exists():
                 raise VialticError("nothing_to_recover", "The recovery baseline no longer exists.")
             baseline = self.store.read_snapshot(pending)
-            skip = [family for family in va.CHECKED_FAMILIES if family not in va.RESTORABLE_FAMILIES
-                    and baseline.family_fingerprints[family] != proposal.baseline.family_fingerprints[family]]
+            skip = proposals.restore_operations(current.configuration, baseline.configuration)[1]
         else:
             baseline = current
             self.store.write_pending(binding, current)
