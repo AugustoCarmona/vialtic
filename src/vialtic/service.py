@@ -314,8 +314,8 @@ class VialticService:
         lighting_save, systems = None, []
         if following and "lighting" in following.families:
             systems = following.lighting_systems
-            # An interrupted write may never have reached its save, which comes last.
-            lighting_save = journal.lighting_save_sent if purpose == "recovery" and journal else following.lighting_saved
+            lighting_save = (self._save_may_have_been_sent(current.device.binding_id, following) if purpose == "recovery"
+                             else following.lighting_saved)
         try:
             operations, blockers, notes = proposals.restore_operations(
                 current.configuration, target.configuration, current.device.vial_protocol, lighting_save, systems,
@@ -548,6 +548,15 @@ class VialticService:
         # A recovery ends whatever operation unlocked it, which may not have left a journal.
         return marker == proposal.id or proposal.proposal_type == "recovery"
 
+    def _save_may_have_been_sent(self, binding: str, following) -> bool:
+        """An interrupted write may never have reached its save, which comes last."""
+        try:
+            journal = self.store.read_journal(binding)
+        except VialticError:
+            return bool(following and following.lighting_saved)  # Unreadable: assume it may have.
+        # The journal is written before any packet, so without one nothing was sent.
+        return journal.lighting_save_sent if journal else False
+
     def _check_previous_readable(self, binding: str) -> None:
         """A write ends by replacing previous.json, so one this build cannot read must stop it first."""
         path = self.store.previous_path(binding)
@@ -573,12 +582,12 @@ class VialticService:
             following = baseline.followed_by
             skip = proposals.restore_operations(current.configuration, baseline.configuration, lighting_systems=(
                 following.lighting_systems if following else ()))[1]
+            # A journal this write replaces must not forget that an earlier attempt may have saved lighting.
+            save_sent = self._save_may_have_been_sent(binding, following)
             try:
                 interrupted = self.store.read_journal(binding)
             except VialticError:
                 interrupted = None
-            # A journal this write replaces must not forget that an earlier attempt may have saved lighting.
-            save_sent = interrupted.lighting_save_sent if interrupted else bool(following and following.lighting_saved)
             if interrupted:
                 # It ran, so its approval is spent. A damaged id in the journal must not stop the recovery.
                 with contextlib.suppress(VialticError):
@@ -829,6 +838,11 @@ class VialticService:
 
     @staticmethod
     def _lighting_exception(state: _ApplyState, observed: Snapshot | None) -> str:
+        baseline_light = state.baseline.configuration.lighting
+        if "vialrgb" in proposals.touched_lighting_systems(state.proposal.operations) and baseline_light.vialrgb \
+                and baseline_light.vialrgb["mode"] == 0:
+            return (", except that VialRGB is at mode 0, which turned the LEDs off if they were running an effect with no "
+                    "VialRGB id")
         if observed is None or not proposals.compare_state(state.baseline.configuration, [], observed.configuration,
                                                            lighting_systems=tuple(va.LIGHTING_FIELDS)):
             return ""
@@ -901,6 +915,7 @@ class VialticService:
                             if must_save:
                                 with session.transport.writes():
                                     session.kb.save_rgb()
+                                state.packets_total += 1
                                 must_save = False
                                 state.warnings.append("The failed write may have saved lighting, so the values read before "
                                                       "it were saved. If those were themselves unsaved, the keyboard's saved "

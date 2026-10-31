@@ -461,7 +461,8 @@ def main(argv: list[str] | None = None) -> int:
         emit_error(args, error)
         return error.exit_code
     except KeyboardInterrupt:
-        emit_error(args, VialticError("cancelled", "Cancelled."))
+        emit_error(args, VialticError("cancelled", "Cancelled. If a write was in progress the keyboard may hold a mix of old "
+                                                   "and new values. Run `vialtic doctor`."))
         return VialticError("cancelled", "").exit_code
     except BrokenPipeError:
         return EXIT_USAGE

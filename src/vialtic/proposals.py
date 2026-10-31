@@ -33,6 +33,8 @@ RECOVERY_TEXT = ("Everything Vialtic can read from the keyboard is saved before 
 LIGHTING_SAVED_NOTE = ("The firmware has one save command for all lighting and cannot report saved values. Any other unsaved "
                        "lighting is saved too, the save itself cannot be verified, and undo can only restore the values read "
                        "just before this write, saving them again.")
+LIGHTING_MEMORY_NOTE = ("Firmware remembers which effect to return to when lighting is switched back on, cannot report it, and "
+                        "overwrites it here. Undo cannot bring it back. The LEDs may also light briefly during this write.")
 LIGHTING_TRANSIENT_NOTE = "This lighting change is not saved: it lasts until the keyboard next loses power."
 
 FAMILY_OF_OPERATION = {"set_key": "keymap", "set_encoder": "encoders", "set_layout_options": "layout_options",
@@ -57,6 +59,16 @@ def touched_lighting_systems(operations: Iterable[Operation]) -> list[str]:
 
 def saves_lighting(operations: Iterable[Operation]) -> bool:
     return any(op.type == "set_lighting" and op.save for op in operations)
+
+
+def resets_remembered_effect(op: SetLightingOperation) -> bool:
+    """Reaching off, or changing values while staying off, passes through an effect first."""
+    if op.system == "rgblight":
+        return op.after["effect"] == 0 and op.before != op.after
+    if op.system == "vialrgb":
+        return op.after["mode"] == 0 and {k: v for k, v in op.before.items() if k != "mode"} != {
+            k: v for k, v in op.after.items() if k != "mode"}
+    return False
 
 
 def after_keycodes(op: Operation) -> list[KeycodeValue]:
@@ -338,10 +350,13 @@ class _Planner:
         if after == before and not change.save:
             return self._skip(f"{change.system} lighting")
         if change.system == "vialrgb" and before["mode"] == 0 and after["mode"] != 0:
-            self.warnings.append("VialRGB reports mode 0, which means off or an effect with no VialRGB id. Undo can only "
-                                 "return it to mode 0, which turns the LEDs off.")
-        self.operations.append(SetLightingOperation(system=change.system, before=before, after=after, save=change.save))
+            self.warnings.append("VialRGB reports mode 0, which means off or an effect with no VialRGB id. Undo and automatic "
+                                 "restore can only return it to mode 0, which turns the LEDs off.")
+        operation = SetLightingOperation(system=change.system, before=before, after=after, save=change.save)
+        self.operations.append(operation)
         self.warnings.append(LIGHTING_SAVED_NOTE if change.save else LIGHTING_TRANSIENT_NOTE)
+        if resets_remembered_effect(operation):
+            self.warnings.append(LIGHTING_MEMORY_NOTE)
 
     def _set_macro(self, change: SetMacroChange) -> None:
         _capability(self.kb.macro_count and self.kb.macro_memory, "macros", "macros")
@@ -532,11 +547,11 @@ def restore_blockers(current: Configuration, target: Configuration) -> list[str]
     blockers = [family for family in want if set(want[family]) - set(have[family])]
     # A snapshot with its macros left out, or a buffer that no longer fits, cannot be written back.
     macros = target.macros
-    if "macros" not in blockers and macros.count and (
-            macros.buffer_b64 is None or macros.count != current.macros.count
+    if "macros" not in blockers and (macros.count != current.macros.count or (macros.count and (
+            macros.buffer_b64 is None
             # Past the end is only fine for the terminators a read adds to a buffer that lacks them.
             or (len(va.decode_macro_buffer(macros.buffer_b64)) > current.macros.memory_bytes
-                and macros.memory_bytes != current.macros.memory_bytes)):
+                and macros.memory_bytes != current.macros.memory_bytes)))):
         blockers.append("macros")
     return blockers
 
@@ -623,6 +638,8 @@ def restore_operations(current: Configuration, target: Configuration, vial_proto
             ops.append(SetLightingOperation(system=system, before=now_light[system], after=wanted, save=bool(lighting_save)))
     if touches_lighting(ops):
         notes.append(LIGHTING_SAVED_NOTE if lighting_save else LIGHTING_TRANSIENT_NOTE)
+    if any(op.type == "set_lighting" and resets_remembered_effect(op) for op in ops):
+        notes.append(LIGHTING_MEMORY_NOTE)
     return ops, blockers, notes
 
 

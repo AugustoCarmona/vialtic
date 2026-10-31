@@ -1003,3 +1003,87 @@ def test_firmware_strings_cannot_reach_the_terminal_as_control_sequences(tmp_pat
     original = rig.backend.enumerate
     rig.backend.enumerate = lambda: [{**d, "product_string": "x\x1b]0;pwn\x07"} for d in original()]
     assert "\x1b" not in rig.service.list_devices().devices[0].identity.name
+
+
+# Fourth review.
+
+def test_failed_write_from_mode_zero_does_not_claim_it_is_as_it_was(tmp_path):
+    rig = Rig(tmp_path, "full")
+    firmware(rig).state["lighting"].update(mode=0)
+    _losing_save_answers(rig, 1)
+    proposal = plan(rig, SetLightingChange(system="vialrgb", save=True, mode=3))
+    assert any("automatic restore" in w for w in proposal.warnings)
+    result = rig.apply(proposal)
+    assert result.outcome == "failed_restored" and "turned the LEDs off" in result.message
+
+
+@pytest.mark.parametrize("scenario, change, warned", [
+    ("split", dict(system="rgblight", effect=0), True),
+    ("split", dict(system="rgblight", brightness=9), False),
+    ("generic", dict(system="vialrgb", mode=0, hue=9), True),
+    ("generic", dict(system="vialrgb", mode=0), False),
+])
+def test_overwriting_the_remembered_effect_is_disclosed(tmp_path, scenario, change, warned):
+    rig = Rig(tmp_path, scenario)
+    proposal = plan(rig, SetLightingChange(save=False, **change))
+    assert any("remembers which effect" in w for w in proposal.warnings) is warned
+
+
+def test_changing_rgb_light_while_off_is_disclosed(tmp_path):
+    rig = Rig(tmp_path, "split")
+    firmware(rig).state["lighting"]["rgb_enabled"] = False
+    proposal = plan(rig, SetLightingChange(system="rgblight", save=False, brightness=9))
+    assert any("remembers which effect" in w for w in proposal.warnings)
+
+
+def test_recovery_with_no_journal_does_not_save_lighting_nobody_saved(make_rig):
+    class Crash(BaseException):
+        pass
+
+    rig = make_rig("full")
+    fw = firmware(rig)
+    fw.state["lighting"]["v"] = 10  # transient, saved value is 64
+    proposal = plan(rig, SetLightingChange(system="vialrgb", save=True, value=99))
+
+    def crashing(journal):
+        raise Crash
+
+    rig.store.write_journal = crashing
+    rig.store.discard_pending = lambda binding_id: None  # a killed process runs no cleanup
+    with pytest.raises(Crash):
+        rig.apply(proposal)
+    restarted = rig.restart()
+    recovery = restarted.service.create_recovery_proposal(None)
+    assert not proposals.saves_lighting(recovery.operations)
+    assert restarted.apply(recovery).outcome == "verified"
+    assert firmware(restarted).state["lighting_saved"]["v"] == 64
+
+
+def test_recovery_with_a_damaged_journal_assumes_the_save_may_have_landed(make_rig):
+    class Crash(BaseException):
+        pass
+
+    rig = make_rig("full")
+    proposal = plan(rig, SetLightingChange(system="vialrgb", save=True, value=99))
+    original = rig.service._write_operation
+
+    def dies(session, op):
+        original(session, op)
+        raise Crash
+
+    rig.service._write_operation = staticmethod(dies)
+    with pytest.raises(Crash):
+        rig.apply(proposal)
+    rig.store.journal_path(proposal.device.binding_id).write_text("{corrupt")
+    assert proposals.saves_lighting(rig.restart().service.create_recovery_proposal(None).operations)
+
+
+def test_firmware_rebuilt_with_macros_is_a_blocker_not_a_tamper_error(make_rig):
+    rig = make_rig("minimal")
+    assert rig.apply(plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z"))).outcome == "verified"
+    fw = firmware(rig)
+    fw.spec = dataclasses.replace(fw.spec, macro_count=2, macro_memory=16)
+    fw.macro[:] = b"hi\x00\x00" + bytes(12)
+    with pytest.raises(VialticError) as error:
+        rig.service.create_undo_proposal(None)
+    assert error.value.code == "restore_unsupported" and error.value.details["families"] == ["macros"]
