@@ -241,6 +241,11 @@ class Store:
 
     def settle_finished_write(self, binding_id: str) -> None:
         """Finish rotation for a write that verified but crashed before cleaning up. No device access."""
+        # The baseline only goes away once its write is resolved, so a journal without one is a leftover.
+        if self.journal_path(binding_id).exists() and not self.pending_path(binding_id).exists():
+            with contextlib.suppress(OSError):
+                self.clear_journal(binding_id)
+            return
         try:
             journal = self.read_journal(binding_id)
         except VialticError:

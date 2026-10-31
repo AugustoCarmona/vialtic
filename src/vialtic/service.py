@@ -495,6 +495,19 @@ class VialticService:
         # A recovery ends whatever operation unlocked it, which may not have left a journal.
         return marker == proposal.id or proposal.proposal_type == "recovery"
 
+    def _check_previous_readable(self, binding: str) -> None:
+        """A write ends by replacing previous.json, so one this build cannot read must stop it first."""
+        path = self.store.previous_path(binding)
+        if not path.exists():
+            return
+        try:
+            self.store.read_snapshot(path)
+        except VialticError as exc:
+            raise VialticError(exc.code, f"The saved previous configuration cannot be read, and this write would replace "
+                                         f"it: {exc.message} Nothing was written.", details=exc.details,
+                               next_steps=[f"Vialtic will not delete it. Move {path} aside by hand to continue, or use the "
+                                           "Vialtic version that wrote it."]) from exc
+
     def _save_baseline(self, session: Session, proposal: Proposal, current: Snapshot, warnings: list[str]) -> _ApplyState:
         binding = session.identity.binding_id
         skip: list[str] = []
@@ -505,6 +518,7 @@ class VialticService:
             baseline = self.store.read_snapshot(pending)
             skip = proposals.restore_operations(current.configuration, baseline.configuration)[1]
         else:
+            self._check_previous_readable(binding)
             baseline = current.model_copy(update={"followed_by": FollowingWrite(
                 families=proposal.affected, lighting_saved=proposals.saves_lighting(proposal.operations))})
             self.store.write_pending(binding, baseline)

@@ -2,6 +2,7 @@
 """M3 gate: each family is read, validated, proposed, applied, verified, backed up and restored."""
 import base64
 import json
+from pathlib import Path
 
 import pytest
 
@@ -827,3 +828,80 @@ def test_writable_operations_follow_the_device(tmp_path):
     assert set(caps) == {"set_key", "set_encoder", "set_layout_option", "set_tap_dance", "set_combo", "set_key_override",
                          "set_alt_repeat_key", "set_qmk_setting", "set_macro", "set_lighting"}
     assert Rig(tmp_path / "m", "minimal").service.read_snapshot().capabilities.writable_operations == ["set_key"]
+
+
+# Backups written by 0.1.0.
+
+FIXTURE = Path(__file__).parent / "fixtures" / "previous_v0_1_0_generic.json"
+
+
+def _with_old_backup(tmp_path):
+    rig = Rig(tmp_path, "generic")
+    binding = rig.service.list_devices().devices[0].identity.binding_id
+    data = json.loads(FIXTURE.read_text())
+    assert data["device"]["binding_id"] == binding, "binding_id must never change: real backups depend on it"
+    path = rig.store.previous_path(binding)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(FIXTURE.read_bytes())
+    return rig, path, data
+
+
+def test_old_backup_is_read_and_fully_restored(tmp_path):
+    rig, path, data = _with_old_backup(tmp_path)
+    undo_plan = rig.service.create_undo_proposal(None)
+    assert set(undo_plan.affected) >= {"encoders", "layout_options", "macros", "tap_dance", "combos", "key_overrides",
+                                       "alt_repeat_keys", "settings"}
+    assert undo_plan.unlock.required
+    assert rig.apply(undo_plan).outcome == "verified"
+    now = rig.service.read_snapshot().configuration
+    assert base64.b64decode(now.macros.buffer_b64) == base64.b64decode(data["configuration"]["macros"]["buffer_b64"])
+    assert now.macros.buffer_b64 == data["configuration"]["macros"]["buffer_b64"]
+    assert now.tap_dance[1] == data["configuration"]["tap_dance"][1] and now.layout_options == 1
+    assert now.settings.values == data["configuration"]["settings"]["values"]
+    fw = firmware(rig)
+    assert fw.state["key_overrides"][0][6] == 0x81 and bytes(fw.macro[:6]) == b"hi\x01\x01\x04\x00"
+
+
+def test_old_backup_keeps_its_bytes_until_a_verified_write_replaces_it(tmp_path):
+    rig, path, _ = _with_old_backup(tmp_path)
+    original = path.read_bytes()
+    proposal = rig.plan((1, 0, 2, "KC_A"))
+    rig.backend.faults.drop_writes_after = 0
+    assert rig.apply(proposal).outcome != "verified"
+    assert path.read_bytes() == original
+
+
+def test_new_backup_records_what_followed(tmp_path):
+    rig, path, _ = _with_old_backup(tmp_path)
+    assert rig.apply(rig.plan((1, 0, 2, "KC_A"))).outcome == "verified"
+    assert json.loads(path.read_text())["followed_by"] == {"families": ["keymap"], "lighting_saved": False}
+
+
+def test_old_backup_does_not_restore_lighting_it_knows_nothing_about(tmp_path):
+    rig, _, _ = _with_old_backup(tmp_path)
+    firmware(rig).state["lighting"]["mode"] = 3
+    undo_plan = rig.service.create_undo_proposal(None)
+    assert "lighting" not in undo_plan.affected and any("Lighting differs" in w for w in undo_plan.warnings)
+
+
+@pytest.mark.parametrize("edit", [
+    lambda data: data.update(schema_version=99),
+    lambda data: data.update(some_future_field=1),
+    lambda data: data["configuration"].pop("macros"),
+])
+def test_unreadable_backup_is_refused_and_never_lost(tmp_path, edit):
+    rig, path, data = _with_old_backup(tmp_path)
+    edit(data)
+    path.write_text(json.dumps(data))
+    original = path.read_bytes()
+    with pytest.raises(VialticError) as error:
+        rig.service.create_undo_proposal(None)
+    assert error.value.code == "invalid_file"
+    proposal = rig.plan((1, 0, 2, "KC_A"))
+    with pytest.raises(VialticError) as error:
+        rig.apply(proposal)
+    assert error.value.code == "invalid_file" and str(path) in error.value.next_steps[0]
+    assert path.read_bytes() == original and rig.write_packets() == 0
+    assert not rig.store.has_unresolved_write(proposal.device.binding_id)
+    path.unlink()
+    assert rig.apply(proposal).outcome == "verified", "moving it aside is the documented way forward"
