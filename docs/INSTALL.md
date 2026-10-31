@@ -8,7 +8,7 @@ Repository entry URL: https://github.com/AugustoCarmona/vialtic
 
 ## Running from source (development)
 
-Needs Python 3.12 or newer. Tested on Linux x86_64 with Python 3.12 and 3.14. macOS arm64 is not yet verified.
+Needs Python 3.12 or newer. Tested on Linux x86_64 with Python 3.12 and 3.14. On macOS 15 arm64 with Python 3.12, CI runs the tests and a packaged build using the emulator; USB with a real keyboard is not yet verified.
 
 ```sh
 python3 -m venv .venv
