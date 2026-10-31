@@ -270,17 +270,23 @@ class Store:
     def has_unresolved_write(self, binding_id: str) -> bool:
         return self.journal_path(binding_id).exists() or self.pending_path(binding_id).exists()
 
-    def set_unlock_marker(self, binding_id: str, proposal_id: str) -> None:
-        """Remember that Vialtic unlocked this keyboard, and for which proposal."""
-        atomic_write(self.unlock_marker_path(binding_id), json.dumps({"proposal_id": proposal_id}).encode())
+    def set_unlock_marker(self, binding_id: str, proposal_id: str, path: str | None = None) -> None:
+        """Remember that Vialtic unlocked this keyboard, for which proposal and at which USB path."""
+        atomic_write(self.unlock_marker_path(binding_id), json.dumps({"proposal_id": proposal_id, "path": path}).encode())
 
-    def clear_unlock_marker(self, binding_id: str) -> None:
+    def clear_unlock_marker(self, binding_id: str, path: str | None = None) -> None:
+        """An identical keyboard shares the binding, so with a path this only clears that unit's marker."""
+        if path is not None and self.read_unlock_marker(binding_id, path) is None:
+            return
         with contextlib.suppress(FileNotFoundError):
             self.unlock_marker_path(binding_id).unlink()
 
-    def read_unlock_marker(self, binding_id: str) -> str | None:
+    def read_unlock_marker(self, binding_id: str, path: str | None = None) -> str | None:
         try:
-            return json.loads(self.unlock_marker_path(binding_id).read_text()).get("proposal_id", "")
+            marker = json.loads(self.unlock_marker_path(binding_id).read_text())
+            if path is not None and marker.get("path") not in (None, path):
+                return None
+            return marker.get("proposal_id", "")
         except FileNotFoundError:
             return None
         except (OSError, ValueError, AttributeError):

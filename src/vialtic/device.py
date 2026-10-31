@@ -88,6 +88,8 @@ def classify_packet(msg: bytes) -> str:
 
 # Every write sets an absolute value, so repeating one is harmless; upstream sends some with no retries.
 WRITE_RETRIES = 20
+# Far more than the largest legitimate reads, so firmware that answers nonsense cannot loop forever.
+MAX_READS_PER_SESSION = 100_000
 
 
 class GuardedTransport:
@@ -111,6 +113,9 @@ class GuardedTransport:
         if self._max_retries is not None:
             retries = min(retries, self._max_retries)
         self.packets[kind] += 1
+        if kind == "read" and self.packets[kind] > MAX_READS_PER_SESSION:
+            raise VialticError("malformed_device_data", "The keyboard keeps answering without finishing a read, so Vialtic stopped.",
+                               next_steps=["Replug the keyboard and retry; report this firmware if it persists."])
         return self._send(dev, msg, retries=retries)
 
     @contextlib.contextmanager

@@ -1015,11 +1015,15 @@ def test_marker_is_dropped_once_the_firmware_is_locked(make_rig):
     assert rig.store.read_unlock_marker(binding) is None
 
 
-def test_unlock_timeout_clears_the_marker(make_rig):
+def test_unlock_timeout_keeps_the_marker_until_a_replug_ends_the_unlock(make_rig):
+    """Firmware ignores a lock while it waits, and polling could still complete that unlock."""
     rig = make_rig(faults=Faults(unlock_never=True), unlock_timeout=0.02)
     proposal = rig.plan((1, 0, 2, "QK_BOOT"))
     with pytest.raises(VialticError):
         rig.apply(proposal)
+    assert rig.store.read_unlock_marker(proposal.device.binding_id) == proposal.id
+    rig.backend.firmware(0).power_cycle()
+    assert rig.service.inspect_device().warnings == []
     assert rig.store.read_unlock_marker(proposal.device.binding_id) is None
 
 

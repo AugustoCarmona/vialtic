@@ -236,7 +236,13 @@ class UnlockStatus(Envelope):
 
 # Requested changes (input).
 
-class SetKeyChange(Model):
+class ChangeModel(Model):
+    """Input from files: a boolean is not a number and text is not a layer."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+class SetKeyChange(ChangeModel):
     type: Literal["set_key"] = "set_key"
     layer: int
     row: int
@@ -244,7 +250,7 @@ class SetKeyChange(Model):
     keycode: str
 
 
-class SetEncoderChange(Model):
+class SetEncoderChange(ChangeModel):
     type: Literal["set_encoder"] = "set_encoder"
     layer: int
     index: int
@@ -252,7 +258,7 @@ class SetEncoderChange(Model):
     keycode: str
 
 
-class SetLayoutOptionChange(Model):
+class SetLayoutOptionChange(ChangeModel):
     """Choose one firmware-defined layout alternative. `index` is its position in the option list."""
 
     type: Literal["set_layout_option"] = "set_layout_option"
@@ -260,7 +266,7 @@ class SetLayoutOptionChange(Model):
     choice: int
 
 
-class SetTapDanceChange(Model):
+class SetTapDanceChange(ChangeModel):
     """Change one tap dance entry. Fields left out keep their current value."""
 
     type: Literal["set_tap_dance"] = "set_tap_dance"
@@ -272,7 +278,7 @@ class SetTapDanceChange(Model):
     tapping_term: int | None = None
 
 
-class SetComboChange(Model):
+class SetComboChange(ChangeModel):
     """Change one combo. `keys` lists up to four inputs and replaces all of them. Fields left out keep their value."""
 
     type: Literal["set_combo"] = "set_combo"
@@ -281,7 +287,7 @@ class SetComboChange(Model):
     output: str | None = None
 
 
-class SetKeyOverrideChange(Model):
+class SetKeyOverrideChange(ChangeModel):
     """Change one key override. Fields left out keep their current value. Masks are integers:
     `layers` has one bit per layer, modifier masks follow QMK's MOD_BIT layout, and `options`
     holds the firmware flags, with bit 7 enabling the entry."""
@@ -297,7 +303,7 @@ class SetKeyOverrideChange(Model):
     options: int | None = None
 
 
-class SetAltRepeatKeyChange(Model):
+class SetAltRepeatKeyChange(ChangeModel):
     """Change one alternate repeat entry. Fields left out keep their current value.
     In `options`, bit 3 enables the entry."""
 
@@ -309,7 +315,7 @@ class SetAltRepeatKeyChange(Model):
     options: int | None = None
 
 
-class SetQmkSettingChange(Model):
+class SetQmkSettingChange(ChangeModel):
     """Change one QMK setting: either the whole `value`, or one flag with `bit` and `enabled`."""
 
     type: Literal["set_qmk_setting"] = "set_qmk_setting"
@@ -319,7 +325,7 @@ class SetQmkSettingChange(Model):
     enabled: bool | None = None
 
 
-class SetMacroChange(Model):
+class SetMacroChange(ChangeModel):
     """Replace one macro. `actions` holds ["text", "abc"], ["tap", "KC_A", ...], ["down", ...],
     ["up", ...] or ["delay", milliseconds]. An empty list clears the macro."""
 
@@ -331,7 +337,7 @@ class SetMacroChange(Model):
 LightingSystem = Literal["rgblight", "backlight", "vialrgb"]
 
 
-class SetLightingChange(Model):
+class SetLightingChange(ChangeModel):
     """Change one lighting system. Fields left out keep their current value.
 
     rgblight takes brightness, effect, effect_speed, hue, saturation. backlight takes brightness,

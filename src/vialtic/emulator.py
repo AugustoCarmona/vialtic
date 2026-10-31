@@ -192,6 +192,8 @@ INITIAL_LIGHTING = {"rgb_brightness": 128, "rgb_effect": 1, "rgb_enabled": True,
 VIALRGB_EFFECTS = (1, 2, 3)
 VIALRGB_MAX_BRIGHTNESS = 128
 RGBLIGHT_MODES = 35
+RGBLIGHT_BREATHING = range(2, 6)
+RGBLIGHT_FIXED_HUE = range(6, 15)  # rainbow mood and swirl
 # All that firmware honours while an unlock is in progress. Anything else is echoed back unchanged.
 DURING_UNLOCK = {proto.CMD_VIAL_GET_KEYBOARD_ID, proto.CMD_VIAL_GET_SIZE, proto.CMD_VIAL_GET_DEFINITION,
                  proto.CMD_VIAL_GET_UNLOCK_STATUS, proto.CMD_VIAL_UNLOCK_START, proto.CMD_VIAL_UNLOCK_POLL}
@@ -337,7 +339,8 @@ class Firmware:
         sub = msg[1]
         enabled = light.setdefault("rgb_enabled", True)
         if sub == proto.QMK_RGBLIGHT_BRIGHTNESS:
-            if enabled:  # rgblight_sethsv_noeeprom does nothing while off
+            # rgblight_sethsv_noeeprom does nothing while off, and keeps brightness while breathing.
+            if enabled and light["rgb_effect"] not in RGBLIGHT_BREATHING:
                 light["rgb_brightness"] = msg[2]
         elif sub == proto.QMK_RGBLIGHT_EFFECT:
             # rgblight_mode_noeeprom: ignored while off, clamped otherwise. Then 0 turns off and anything else on.
@@ -353,8 +356,9 @@ class Firmware:
         elif sub == proto.QMK_BACKLIGHT_EFFECT:
             light["bl_effect"] = 1 if msg[2] else 0  # breathing on or off
         elif sub == proto.QMK_RGBLIGHT_COLOR:
-            if enabled:
-                light["rgb_h"], light["rgb_s"] = msg[2], msg[3]
+            if enabled:  # and keeps hue in the rainbow effects
+                light["rgb_h"] = light["rgb_h"] if light["rgb_effect"] in RGBLIGHT_FIXED_HUE else msg[2]
+                light["rgb_s"] = msg[3]
         elif sub == proto.VIALRGB_SET_MODE:
             mode, speed, hue, saturation, value = struct.unpack("<HBBBB", msg[2:8])
             # Like the firmware: unknown effects are ignored and brightness is clamped.

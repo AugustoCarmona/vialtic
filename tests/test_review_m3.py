@@ -8,11 +8,10 @@ import pytest
 
 from conftest import Rig
 from vialtic import cli, proposals, vial_adapter as va
-from vialtic.device import GuardedTransport
 from vialtic.emulator import Faults
 from vialtic.errors import VialticError
 from vialtic.models import (
-    ChangeSet, SetKeyChange, SetLightingChange, SetMacroChange, SetQmkSettingChange, SetTapDanceChange,
+    ChangeSet, SetKeyChange, SetLayoutOptionChange, SetLightingChange, SetMacroChange, SetQmkSettingChange, SetTapDanceChange,
 )
 from vialtic.proposals import proposal_id
 from vialtic.service import attestation_for
@@ -490,3 +489,310 @@ def test_reconnect_window_option_applies_to_an_existing_proposal(tmp_path):
     proposal = plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z"))
     short = Rig(tmp_path, "full", Faults(disconnect_after_writes=0), reconnect_window=0.05)
     assert short.apply(proposal).outcome == "unknown"
+
+
+# Second review.
+
+def test_backup_of_a_connected_twin_is_never_applied_to_the_other(tmp_path):
+    rig = Rig(tmp_path, "twins")
+    devices = [e.identity.device_id for e in rig.service.list_devices().devices]
+    proposal = rig.service.create_proposal(devices[0], ChangeSet(changes=[SetKeyChange(layer=1, row=0, col=2, keycode="KC_A")]))
+    assert rig.apply(proposal, devices[0]).outcome == "verified"
+    rig.external_set(1, 0, 3, 0x1D, device=1)
+    with pytest.raises(VialticError) as error:
+        rig.service.create_undo_proposal(devices[1])
+    assert error.value.code == "device_ambiguous" and devices[0] in error.value.next_steps[0]
+    assert rig.service.create_undo_proposal(devices[0]).operations
+
+
+def test_recovery_of_a_connected_twin_keeps_the_backup_for_its_owner(tmp_path):
+    rig = Rig(tmp_path, "twins", Faults(disconnect_after_writes=1), reconnect_window=0.02)
+    devices = [e.identity.device_id for e in rig.service.list_devices().devices]
+    proposal = rig.service.create_proposal(devices[0], ChangeSet(changes=[
+        SetKeyChange(layer=1, row=0, col=2, keycode="KC_A"), SetKeyChange(layer=1, row=0, col=3, keycode="KC_B")]))
+    rig.apply(proposal, devices[0])
+    restarted = rig.restart()
+    with pytest.raises(VialticError) as error:
+        restarted.service.create_recovery_proposal(devices[1])
+    assert error.value.code == "device_ambiguous"
+    assert restarted.store.pending_path(proposal.device.binding_id).exists()
+    assert restarted.apply(restarted.service.create_recovery_proposal(devices[0]), devices[0]).outcome == "verified"
+
+
+def _saved_then_disconnected(tmp_path):
+    rig = Rig(tmp_path, "full", reconnect_window=0.02)
+    proposal = plan(rig, SetLightingChange(system="vialrgb", save=True, hue=200))
+    fw = firmware(rig)
+
+    def hook(msg):
+        if msg[0] == va.proto.CMD_VIA_LIGHTING_SAVE:
+            fw.state["lighting_saved"] = dict(fw.state["lighting"])
+            rig.backend.disconnect()
+            raise OSError("device disconnected")
+
+    rig.backend.packet_hook = hook
+    assert rig.apply(proposal).outcome == "unknown"
+    return rig
+
+
+def test_a_failed_recovery_remembers_the_firmware_saved_the_bad_lighting(tmp_path):
+    rig = _saved_then_disconnected(tmp_path)
+    second = rig.restart(Faults(disconnect_after_writes=0))
+    recovery = second.service.create_recovery_proposal(None)
+    assert recovery.operations[0].save is True
+    assert second.apply(recovery).outcome == "unknown"
+    third = rig.restart()
+    again = third.service.create_recovery_proposal(None)
+    assert again.operations[0].save is True, "the fact must survive the failed attempt"
+    assert third.apply(again).outcome == "verified"
+    fw = firmware(third)
+    assert fw.state["lighting_saved"]["h"] == 16
+    fw.power_cycle()
+    assert fw.state["lighting"]["h"] == 16
+
+
+def test_a_glitch_during_recovery_does_not_claim_restored_without_the_save(tmp_path):
+    rig = _saved_then_disconnected(tmp_path)
+    second = rig.restart()
+    recovery = second.service.create_recovery_proposal(None)
+    fw = firmware(second)
+    glitched = []
+
+    def glitch(msg):
+        if msg[0] == va.proto.CMD_VIA_LIGHTING_SET_VALUE and not glitched:
+            glitched.append(msg)
+            raise OSError("glitch")
+
+    second.backend.packet_hook = glitch
+    assert second.apply(recovery).outcome == "failed_restored"
+    assert fw.state["lighting_saved"]["h"] == 16
+
+
+@pytest.mark.parametrize("start, change, expect", [
+    (1, dict(effect=3, brightness=50), ("rgb_effect", 3, "rgb_brightness", 50)),
+    (3, dict(effect=1, brightness=50), ("rgb_effect", 1, "rgb_brightness", 50)),
+    (3, dict(brightness=50), ("rgb_effect", 3, "rgb_brightness", 50)),
+    (7, dict(effect=1, hue=99), ("rgb_effect", 1, "rgb_h", 99)),
+    (7, dict(hue=99), ("rgb_effect", 7, "rgb_h", 99)),
+])
+def test_rgb_values_firmware_ignores_in_some_effects_still_land_and_undo(tmp_path, start, change, expect):
+    rig = Rig(tmp_path, "split")
+    fw = firmware(rig)
+    fw.state["lighting"]["rgb_effect"] = start
+    before = dict(fw.state["lighting"])
+    result = rig.apply(plan(rig, SetLightingChange(system="rgblight", save=False, **change)))
+    assert result.outcome == "verified", result.differences
+    assert fw.state["lighting"][expect[0]] == expect[1] and fw.state["lighting"][expect[2]] == expect[3]
+    assert rig.apply(rig.service.create_undo_proposal(None)).outcome == "verified"
+    assert {k: fw.state["lighting"][k] for k in before} == before
+
+
+def test_timed_out_unlock_keeps_its_marker_so_a_later_unlock_is_reported(make_rig):
+    rig = make_rig("full", faults=Faults(unlock_never=True), unlock_timeout=0.02)
+    proposal = plan(rig, SetMacroChange(index=0, actions=[["text", "x"]]))
+    with pytest.raises(VialticError):
+        rig.apply(proposal)
+    assert rig.store.read_unlock_marker(proposal.device.binding_id) == proposal.id
+    fw = firmware(rig)
+    fw.unlock_never = False
+    for _ in range(5):
+        rig.service.unlock_poll(None)
+    assert fw.state["unlocked"]
+    assert any("has not locked" in w for w in rig.service.inspect_device().warnings)
+    result = rig.apply(proposal)
+    assert result.outcome == "verified" and result.relocked is True and not fw.state["unlocked"]
+
+
+def test_identical_locked_keyboard_does_not_clear_the_other_ones_marker(tmp_path):
+    rig = Rig(tmp_path, "twins")
+    devices = [e.identity.device_id for e in rig.service.list_devices().devices]
+    proposal = rig.service.create_proposal(devices[0], ChangeSet(changes=[SetKeyChange(layer=1, row=0, col=2, keycode="QK_BOOT")]))
+    rig.service.unlock_start(proposal.id, rig.approve(proposal), devices[0])
+    for _ in range(5):
+        rig.service.unlock_poll(devices[0])
+    assert rig.service.inspect_device(devices[1]).warnings == []
+    assert any("has not locked" in w for w in rig.service.inspect_device(devices[0]).warnings)
+    assert rig.apply(proposal, devices[0]).relocked is True
+
+
+def test_recovery_spends_the_proposal_it_recovers_from(make_rig):
+    class Crash(BaseException):
+        pass
+
+    rig = make_rig()
+    proposal = rig.plan((1, 0, 2, "KC_A"), (1, 0, 3, "KC_B"))
+    original = rig.service._write_operation
+
+    def dies(session, op):
+        original(session, op)
+        raise Crash
+
+    rig.service._write_operation = staticmethod(dies)
+    with pytest.raises(Crash):
+        rig.apply(proposal)
+    restarted = rig.restart()
+    assert restarted.apply(restarted.service.create_recovery_proposal(None)).outcome == "verified"
+    with pytest.raises(VialticError) as error:
+        restarted.apply(proposal)
+    assert error.value.code == "proposal_not_found"
+
+
+@pytest.mark.parametrize("text", ["LT(1,LCTL(KC_A))", "LT1(LSFT(KC_B))", "MT(MOD_LCTL,LSFT(KC_A))", "LSFT(MO(1))", "LSFT(TD(1))",
+                                  "LT(0,MO(1))", "MT(0x3F,KC_A)", "LSFT_T(KC_EXLM)", "LCTL(0x5100)"])
+def test_keycode_arguments_that_do_not_fit_are_refused(tmp_path, text):
+    rig = Rig(tmp_path, "full")
+    with pytest.raises(VialticError) as error:
+        plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode=text))
+    assert error.value.code == "invalid_keycode"
+
+
+@pytest.mark.parametrize("text, name", [("LCTL(LSFT(KC_A))", "C_S(KC_A)"), ("LCTL(KC_EXLM)", None), ("LT(1, KC_A)", "LT1(KC_A)"),
+                                        ("MT(MOD_LCTL | MOD_LSFT, KC_A)", None), ("LSFT_T(KC_F)", "LSFT_T(KC_F)")])
+def test_keycode_arguments_that_fit_still_work(tmp_path, text, name):
+    rig = Rig(tmp_path, "full")
+    op = plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode=text)).operations[0]
+    assert name is None or op.after.keycode == name
+
+
+def test_recovery_leaves_a_family_it_said_it_would_leave(make_rig):
+    class Crash(BaseException):
+        pass
+
+    rig = make_rig()
+    proposal = rig.plan((1, 0, 2, "KC_A"), (1, 0, 3, "KC_B"))
+    original = rig.service._write_operation
+
+    def dies(session, op):
+        original(session, op)
+        raise Crash
+
+    rig.service._write_operation = staticmethod(dies)
+    with pytest.raises(Crash):
+        rig.apply(proposal)
+    restarted = rig.restart()
+    fw = firmware(restarted)
+    fw.spec = dataclasses.replace(fw.spec, layers=fw.spec.layers - 1)
+    recovery = restarted.service.create_recovery_proposal(None)
+    assert "keymap" not in recovery.affected and any("keymap" in w and "stay as they are" in w for w in recovery.warnings)
+    assert restarted.apply(recovery).outcome == "verified"
+    assert not restarted.store.has_unresolved_write(proposal.device.binding_id)
+
+
+def test_dropped_tail_of_a_macro_write_is_not_verified(tmp_path):
+    rig = Rig(tmp_path, "generic")
+    assert rig.apply(plan(rig, SetMacroChange(index=0, actions=[["text", "x" * 200]]))).outcome == "verified"
+    packets = []
+    fw = firmware(rig)
+    original = fw.handle
+
+    def drops_after_two(msg):
+        if msg[0] == va.proto.CMD_VIA_MACRO_SET_BUFFER:
+            packets.append(msg)
+            if len(packets) > 2:
+                return msg.ljust(va.MSG_LEN, b"\x00")
+        return original(msg)
+
+    fw.handle = drops_after_two
+    result = rig.apply(plan(rig, SetMacroChange(index=0, actions=[])))
+    assert result.outcome != "verified" and "macro memory does not hold" in result.message
+
+
+def test_replug_during_a_write_says_lighting_may_differ(tmp_path):
+    rig = Rig(tmp_path, "full", Faults(disconnect_after_writes=0, reconnect_after_seconds=0.0), reconnect_window=2.0)
+    fw = firmware(rig)
+    fw.state["lighting"]["v"] = 77  # transient
+    result = rig.apply(plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z")))
+    assert result.outcome == "failed_restored" and "except lighting" in result.message
+
+
+@pytest.mark.parametrize("edit", [
+    lambda c: c["tap_dance"][0].__setitem__(4, 70000),
+    lambda c: c["settings"]["values"].__setitem__("7", 70000),
+    lambda c: c.update(layout_options=-5),
+])
+def test_damaged_pending_file_is_an_apply_outcome_not_a_crash(make_rig, edit):
+    class Crash(BaseException):
+        pass
+
+    rig = make_rig("full")
+    proposal = plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z"), SetKeyChange(layer=0, row=1, col=0, keycode="KC_Y"))
+    original = rig.service._write_operation
+
+    def dies(session, op):
+        original(session, op)
+        raise Crash
+
+    rig.service._write_operation = staticmethod(dies)
+    with pytest.raises(Crash):
+        rig.apply(proposal)
+    path = rig.store.pending_path(proposal.device.binding_id)
+    data = json.loads(path.read_text())
+    edit(data["configuration"])
+    path.write_text(json.dumps(data))
+    restarted = rig.restart()
+    recovery = restarted.service.create_recovery_proposal(None)
+    assert restarted.apply(recovery).outcome in ("partial", "unknown")
+    assert path.exists()
+
+
+def test_backup_with_no_protocol_is_a_clear_refusal(tmp_path):
+    rig = Rig(tmp_path, "full")
+    proposal = plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z"))
+    rig.apply(proposal)
+    path = rig.store.previous_path(proposal.device.binding_id)
+    data = json.loads(path.read_text())
+    data["device"]["vial_protocol"] = None
+    path.write_text(json.dumps(data))
+    with pytest.raises(VialticError) as error:
+        rig.service.create_undo_proposal(None)
+    assert error.value.code == "invalid_file"
+
+
+def test_undo_text_shows_layout_choices(tmp_path):
+    rig = Rig(tmp_path, "full")
+    rig.apply(plan(rig, SetLayoutOptionChange(index=1, choice=2)))
+    undo = rig.service.create_undo_proposal(None)
+    assert proposals.describe_operation(undo.operations[0]) == "layout options: 2 [0, 2] -> 0 [0, 0]"
+
+
+def test_default_output_has_no_hash_of_macro_contents(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    assert cli.main(["snapshot", "--emulator", "full", "--json"]) == 0
+    snapshot = json.loads(capsys.readouterr().out)["result"]
+    assert snapshot["family_fingerprints"]["macros"] == "redacted"
+    assert cli.main(["plan", "--emulator", "full", "--set", "0:0,0=KC_Z", "--json"]) == 0
+    proposal = json.loads(capsys.readouterr().out)["result"]
+    assert proposal["baseline"]["family_fingerprints"]["macros"] == "redacted"
+
+
+@pytest.mark.parametrize("change", [
+    {"type": "set_key", "layer": 0, "row": True, "col": 0, "keycode": "KC_A"},
+    {"type": "set_key", "layer": "0", "row": 0, "col": 0, "keycode": "KC_A"},
+    {"type": "set_tap_dance", "index": 0, "tapping_term": True},
+    {"type": "set_key_override", "index": 0, "options": 135.0},
+    {"type": "set_qmk_setting", "qsid": 7, "value": True},
+])
+def test_change_files_do_not_coerce_types(tmp_path, capsys, monkeypatch, change):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"schema_version": 1, "changes": [change]}))
+    code = cli.main(["plan", "--emulator", "full", "--changes", str(path), "--json"])
+    assert code != 0 and json.loads(capsys.readouterr().out)["error"]["code"] == "invalid_request"
+
+
+def test_firmware_that_never_ends_a_settings_query_is_bounded(tmp_path, monkeypatch):
+    monkeypatch.setattr("vialtic.device.MAX_READS_PER_SESSION", 3000)
+    rig = Rig(tmp_path, "full")
+    fw = firmware(rig)
+    original = fw._vial
+
+    def echoes_the_query(msg, resp):
+        if msg[1] != va.proto.CMD_VIAL_QMK_SETTINGS_QUERY:
+            original(msg, resp)
+
+    fw._vial = echoes_the_query
+    with pytest.raises(VialticError) as error:
+        rig.service.read_snapshot()
+    assert error.value.code == "malformed_device_data"

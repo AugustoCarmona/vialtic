@@ -177,7 +177,7 @@ class _Planner:
     def _bounded(self, value: int | None, current: int, limit: int, what: str) -> int:
         if value is None:
             return current
-        if isinstance(value, bool) or not 0 <= value <= limit:
+        if not 0 <= value <= limit:
             raise VialticError("invalid_request", f"{what} must be between 0 and {limit}, not {value}.")
         return value
 
@@ -282,7 +282,7 @@ class _Planner:
         if fields[0]["type"] == "integer":
             if by_bit:
                 raise VialticError("invalid_request", f"QMK setting {qsid} ({fields[0]['title']}) is a number, not flags.")
-            if isinstance(change.value, bool) or not fields[0]["min"] <= change.value <= fields[0]["max"]:
+            if not fields[0]["min"] <= change.value <= fields[0]["max"]:
                 raise VialticError("invalid_request", f"QMK setting {qsid} ({fields[0]['title']}) must be between "
                                                       f"{fields[0]['min']} and {fields[0]['max']}, not {change.value}.")
             value = change.value
@@ -294,7 +294,7 @@ class _Planner:
                 value = value | (1 << change.bit) if change.enabled else value & ~(1 << change.bit)
             else:
                 width = fields[0].get("width", 1)
-                if isinstance(change.value, bool) or not 0 <= change.value < 1 << (8 * width):
+                if not 0 <= change.value < 1 << (8 * width):
                     raise VialticError("invalid_request", f"QMK setting {qsid} must fit in {width} byte(s), not {change.value}.")
                 if (change.value ^ current) & ~known:
                     raise VialticError("invalid_request", f"QMK setting {qsid}: the value changes bits Vial does not define "
@@ -404,6 +404,11 @@ def macro_buffer_operation(before: bytes, after: bytes, count: int, memory: int,
                               after_buffer_b64=base64.b64encode(after).decode("ascii"))
 
 
+def redact_fingerprints(fingerprints: dict[str, str]) -> dict[str, str]:
+    """A plain hash would confirm a guess at the contents."""
+    return {family: "redacted" if family == "macros" else value for family, value in fingerprints.items()}
+
+
 def redact_proposal(proposal: Proposal) -> Proposal:
     """A copy safe for default output. Its id no longer verifies, so it is for display only."""
     operations = []
@@ -412,7 +417,8 @@ def redact_proposal(proposal: Proposal) -> Proposal:
             changed = [item.model_copy(update=dict(before=None, after=None)) for item in op.changed]
             op = op.model_copy(update=dict(changed=changed, before_buffer_b64=None, after_buffer_b64=None, redacted=True))
         operations.append(op)
-    return proposal.model_copy(update={"operations": operations})
+    baseline = proposal.baseline.model_copy(update={"family_fingerprints": redact_fingerprints(proposal.baseline.family_fingerprints)})
+    return proposal.model_copy(update={"operations": operations, "baseline": baseline})
 
 
 def describe_operation(op: Operation) -> str:
@@ -525,28 +531,34 @@ def restore_blockers(current: Configuration, target: Configuration) -> list[str]
 
 def restore_operations(current: Configuration, target: Configuration, vial_protocol: int | None = None,
                        lighting_save: bool | None = None,
-                       lighting_systems: Iterable[str] = ()) -> tuple[list[Operation], list[str], list[str]]:
+                       lighting_systems: Iterable[str] = (),
+                       layout_labels: list | None = None) -> tuple[list[Operation], list[str], list[str]]:
     """Operations turning current into target. Also returns unrestorable families and notes.
 
     `lighting_systems` are the ones this restore covers, and `lighting_save` whether to save them.
     Anything else in lighting is left alone, because keys on the board may have changed it.
     """
     ops: list[Operation] = []
-    now_keys = {(e.layer, e.row, e.col): e for e in current.keymap}
-    for wanted in target.keymap:
-        have = now_keys.get((wanted.layer, wanted.row, wanted.col))
-        if have is not None and have.raw != wanted.raw:
-            ops.append(SetKeyOperation(layer=wanted.layer, row=wanted.row, col=wanted.col, before=_value(have),
-                                       after=_value(wanted)))
-    now_encoders = {(e.layer, e.index, e.direction): e for e in current.encoders}
-    for wanted in target.encoders:
-        have = now_encoders.get((wanted.layer, wanted.index, wanted.direction))
-        if have is not None and have.raw != wanted.raw:
-            ops.append(SetEncoderOperation(layer=wanted.layer, index=wanted.index, direction=wanted.direction,
-                                           before=_value(have), after=_value(wanted)))
     blockers = restore_blockers(current, target)
+    if "keymap" not in blockers:
+        now_keys = {(e.layer, e.row, e.col): e for e in current.keymap}
+        for wanted in target.keymap:
+            have = now_keys[(wanted.layer, wanted.row, wanted.col)]
+            if have.raw != wanted.raw:
+                ops.append(SetKeyOperation(layer=wanted.layer, row=wanted.row, col=wanted.col, before=_value(have),
+                                           after=_value(wanted)))
+    if "encoders" not in blockers:
+        now_encoders = {(e.layer, e.index, e.direction): e for e in current.encoders}
+        for wanted in target.encoders:
+            have = now_encoders[(wanted.layer, wanted.index, wanted.direction)]
+            if have.raw != wanted.raw:
+                ops.append(SetEncoderOperation(layer=wanted.layer, index=wanted.index, direction=wanted.direction,
+                                               before=_value(have), after=_value(wanted)))
     if "layout_options" not in blockers and current.layout_options != target.layout_options:
-        ops.append(SetLayoutOptionsOperation(before=current.layout_options, after=target.layout_options))
+        labels = layout_labels or []
+        ops.append(SetLayoutOptionsOperation(before=current.layout_options, after=target.layout_options,
+                                             before_choices=va.layout_choices(labels, current.layout_options),
+                                             after_choices=va.layout_choices(labels, target.layout_options)))
     if "tap_dance" not in blockers:
         for index, (have_td, want_td) in enumerate(zip(current.tap_dance, target.tap_dance)):
             if list(have_td) != list(want_td):

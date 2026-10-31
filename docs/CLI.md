@@ -57,14 +57,14 @@ Rules worth knowing:
 - **Alternate repeat `options`:** bit 0 default to this key, 1 bidirectional, 2 ignore handedness, 3 enabled. Unnamed bits behave the same way.
 - **Combos:** `keys` replaces all four inputs. A `KC_NO` before another input gets a warning.
 - **QMK settings:** give `value`, or `bit` and `enabled` for one flag. Ranges and flags come from the pinned table. Bits the table does not define can be kept but not changed. Settings unknown to the table are refused, as are ones the firmware refuses to report.
-- **Macros:** one macro is replaced at a time; the others keep their exact bytes, even malformed ones. The unused rest of the buffer is zeroed, so a cleared macro's text does not stay in keyboard memory. Text may hold printable ASCII, tabs and newlines. `KC_NO` is refused because it would encode a zero byte, which ends a macro. Delays need Vial protocol 2 or newer, and 16-bit keycodes need protocol 5 or newer. A result over the buffer size is refused with `capacity_exceeded`, never truncated.
+- **Macros:** one macro is replaced at a time; the others keep their exact bytes, even malformed ones. The unused rest of the buffer is zeroed and read back, so a cleared macro's text does not stay in keyboard memory. A macro write therefore sends the whole buffer, however small the edit. Text may hold printable ASCII, tabs and newlines. `KC_NO` is refused because it would encode a zero byte, which ends a macro. Delays need Vial protocol 2 or newer, and 16-bit keycodes need protocol 5 or newer. A result over the buffer size is refused with `capacity_exceeded`, never truncated.
 - **Lighting:** `save` is required. `true` sends the firmware's one save command after the values verify. It saves all lighting, not just this system, and with no other field it makes the current values permanent. `false` lasts until the keyboard loses power. A request cannot mix them. Backlight `effect` is 0 or 1.
 
 ### Macro contents
 
 Macro text can hold anything a person typed, so contents stay out of default output: `plan`, `undo plan`, `recover plan`, `proposal show` and `snapshot` show which macros change and how many bytes, not what they hold. Errors and verification differences also leave contents out. The buffers are in the proposal, backup and any file you ask for, all mode 0600. **Before asking for approval of a proposal that changes macros, show the user `vialtic proposal show ID --include-macros`.** The before and after shown there are a parsed preview, which can hide malformed bytes; the raw buffer is what gets written.
 
-Keycodes use Vial/QMK names (`KC_A`, `MO(1)`, `LT(2, KC_SPC)`, `LGUI(KC_3)`, `LSFT_T(KC_F)`) or a hex value for unnamed custom codes. Input is parsed by a strict grammar; anything else is refused, never mapped to `KC_NO` as upstream's own decoder does.
+Keycodes use Vial/QMK names (`KC_A`, `MO(1)`, `LT(2, KC_SPC)`, `LGUI(KC_3)`, `LSFT_T(KC_F)`) or a hex value for unnamed custom codes. Input is parsed by a strict grammar; anything else is refused, never mapped to `KC_NO` as upstream's own decoder does. Arguments that do not fit, such as `LT(1, LCTL(KC_A))` or `LSFT(MO(1))`, are refused rather than masked. Change files are strictly typed: `true` is not a number and `"0"` is not a layer.
 
 ## The approval contract
 
@@ -133,9 +133,9 @@ Linux: `$XDG_STATE_HOME/vialtic`, falling back to `~/.local/state/vialtic`. macO
 - The firmware reports only current lighting values and has one save command for all lighting. Vialtic cannot read saved values, cannot tell if current values are saved, and cannot confirm a save reached permanent storage. So undoing a saved lighting change restores and saves the values read just before it; if those were themselves unsaved, they are now saved.
 - Firmware may clamp values, such as a lighting brightness limit. Read-back then fails the apply and the prior values are restored.
 - While a physical unlock is in progress, firmware ignores every command except unlock status and polling, and only ending the unlock or a replug clears it. Every other command, including `lock`, answers `unlock_in_progress`. Cancelling or timing out cannot stop it from the host, so replug the keyboard before retrying.
-- A backup holds what was read from a keyboard identified by model and firmware. If its USB path changed, `undo plan` and `recover plan` refuse (`device_ambiguous`) until you confirm it is the same unit with `--device`.
+- A backup holds what was read from a keyboard identified by model and firmware. If its USB path changed, `undo plan` and `recover plan` refuse (`device_ambiguous`) until you confirm it is the same unit with `--device`, and they keep refusing while another keyboard with that identity sits at the original path. Unlock tracking is per USB path, with one marker per identity, so two identical keyboards unlocked by Vialtic at the same time are not both tracked.
 - Backlight brightness is a level in firmware (`level = value * levels / 255`), and the number of levels is not reported. Any other value fails read-back and is reported with what the firmware kept. Asking for that reported value works.
-- The firmware treats RGB light effect 0 as off and ignores colour changes while off, so a colour change on an RGB light that stays off fails read-back.
+- The firmware treats RGB light effect 0 as off and ignores colour changes while off, so a colour change on an RGB light that stays off fails read-back. It also ignores brightness while breathing and hue in the rainbow effects, so a colour change on an RGB light passes briefly through the static effect, and you may see it flicker.
 
 ## Emulator scenarios
 

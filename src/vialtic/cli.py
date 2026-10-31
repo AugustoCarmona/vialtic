@@ -169,7 +169,14 @@ def _changes_from_args(args: argparse.Namespace) -> ChangeSet:
 def _redact_macros(snapshot: Snapshot) -> Snapshot:
     config = snapshot.configuration
     macros = config.macros.model_copy(update=dict(buffer_b64=None, macros=None, redacted=True))
-    return snapshot.model_copy(update={"configuration": config.model_copy(update={"macros": macros})})
+    return snapshot.model_copy(update={"configuration": config.model_copy(update={"macros": macros}),
+                                       "family_fingerprints": redact_fingerprints(snapshot.family_fingerprints)})
+
+
+def redact_fingerprints(fingerprints: dict[str, str]) -> dict[str, str]:
+    from .proposals import redact_fingerprints as redact
+
+    return redact(fingerprints)
 
 
 def _redacted(proposal: Proposal) -> Proposal:

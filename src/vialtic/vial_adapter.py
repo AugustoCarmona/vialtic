@@ -248,11 +248,26 @@ def _literal_layers(tree: ast.AST, text: str) -> list[int]:
                 layers.append(int(match.group(1)))
             for index, arg in enumerate(node.args):
                 walk(arg, _MOD_ARGUMENT.get(name) == index)
+            _check_argument_limits(name, node, required, text)
         else:
             raise _invalid(text, f"unsupported syntax ({type(node).__name__})")
 
     walk(tree)
     return layers
+
+
+def _check_argument_limits(name: str, node: ast.Call, parameters: list, text: str) -> None:
+    """Upstream's functions mask their arguments, which silently loses whatever does not fit."""
+    tap = name in ("MT", "LT") or name.endswith("_T") or re.fullmatch(r"LT\d+", name) is not None
+    for parameter, arg in zip(parameters, node.args):
+        limit = {"kc": 0xFF if tap else 0x1FFF, "layer": 0xF if name in ("LT", "LM") else 0xFF, "n": 0xFF,
+                 "mod": 0x1F if name == "MT" else Keycode.resolve("QMK_LM_MASK") if name == "LM" else 0xFF}[parameter.name]
+        try:
+            value = Keycode.deserialize(ast.unparse(arg), reraise=True)
+        except Exception as exc:
+            raise _invalid(text, str(exc) or type(exc).__name__) from exc
+        if not 0 <= value <= limit:
+            raise _invalid(text, f"the {parameter.name} argument of {name} does not fit, and part of it would be lost")
 
 
 def _numeric_reference_problem(kb: Keyboard, raw: int) -> tuple[str, str] | None:
@@ -602,6 +617,16 @@ def writable_macro_bytes(buffer: bytes, memory: int) -> bytes:
     return buffer[:memory].ljust(memory, b"\x00")
 
 
+def read_macro_memory(kb: Keyboard) -> bytes:
+    """All of it. Upstream stops at the last terminator, which cannot show what lies after it."""
+    data = b""
+    for offset in range(0, kb.macro_memory, proto.BUFFER_FETCH_CHUNK):
+        size = min(proto.BUFFER_FETCH_CHUNK, kb.macro_memory - offset)
+        answer = kb.usb_send(kb.dev, struct.pack(">BHB", proto.CMD_VIA_MACRO_GET_BUFFER, offset, size), retries=20)
+        data += answer[4:4 + size]
+    return data
+
+
 def decode_macro_buffer(text: str) -> bytes:
     return base64.b64decode(text, validate=True)
 
@@ -698,28 +723,46 @@ def _write_backlight_brightness(kb: Keyboard, value: int) -> None:
         kb.set_qmk_backlight_brightness(value + 1)
 
 
+RGBLIGHT_STATIC = 1
+
+
+def _write_rgblight(kb: Keyboard, effect: int, after: dict[str, int], changed: set[str]) -> None:
+    """Firmware ignores colour while off, brightness while breathing and hue in some effects, and
+    from off the first effect packet only turns the light on with its old mode. So colour changes
+    pass through the static effect, whichever effect is on either side."""
+    def set_effect(current: int, wanted: int) -> int:
+        kb.set_qmk_rgblight_effect(wanted)
+        if current == 0 and wanted != 0:
+            kb.set_qmk_rgblight_effect(wanted)
+        return wanted
+
+    if changed & {"brightness", "hue", "saturation"} and (effect != 0 or after["effect"] != 0):
+        if effect != RGBLIGHT_STATIC:
+            effect = set_effect(effect, RGBLIGHT_STATIC)
+        kb.set_qmk_rgblight_color(after["hue"], after["saturation"], after["brightness"])
+    elif changed & {"brightness", "hue", "saturation"}:
+        kb.set_qmk_rgblight_color(after["hue"], after["saturation"], after["brightness"])  # read-back reports it stayed off
+    if "effect_speed" in changed:
+        kb.set_qmk_rgblight_effect_speed(after["effect_speed"])
+    if effect != after["effect"]:
+        set_effect(effect, after["effect"])
+
+
 def _write_lighting(kb: Keyboard, op) -> None:
     """Sets current values only. Saving is a separate step that follows verification."""
     after, changed = op.after, {name for name in op.after if op.after[name] != op.before.get(name)}
     if op.system == "rgblight":
-        # Effect 0 means off, and firmware ignores colour while off. From off, the first effect packet
-        # only turns it on with the old mode, so it takes a second one. Going off, it comes last.
-        turning_on = "effect" in changed and op.before.get("effect") == 0
-        if turning_on:
-            kb.set_qmk_rgblight_effect(after["effect"])
-            kb.set_qmk_rgblight_effect(after["effect"])
-        if changed & {"brightness", "hue", "saturation"}:
-            kb.set_qmk_rgblight_color(after["hue"], after["saturation"], after["brightness"])
-        if "effect_speed" in changed:
-            kb.set_qmk_rgblight_effect_speed(after["effect_speed"])
-        if "effect" in changed and not turning_on:
-            kb.set_qmk_rgblight_effect(after["effect"])
+        _write_rgblight(kb, op.before["effect"], after, changed)
     elif op.system == "backlight":
         if "brightness" in changed:
             _write_backlight_brightness(kb, after["brightness"])
         if "effect" in changed:
             kb.set_qmk_backlight_effect(after["effect"])
     else:
+        # Firmware may ignore colour while off, so a colour change on the way off goes first.
+        if after["mode"] == 0 and op.before["mode"] != 0 and changed & {"hue", "saturation", "value"}:
+            kb.rgb_mode, kb.rgb_speed = op.before["mode"], after["speed"]
+            kb.set_vialrgb_color(after["hue"], after["saturation"], after["value"])
         # One packet carries all VialRGB values, so set the two fields upstream's setter does not.
         kb.rgb_mode, kb.rgb_speed = after["mode"], after["speed"]
         kb.set_vialrgb_color(after["hue"], after["saturation"], after["value"])
