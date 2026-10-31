@@ -193,7 +193,7 @@ def sha256_json(value: Any) -> str:
 
 def _display_name(desc: dict[str, Any]) -> str:
     name = f"{desc.get('manufacturer_string') or ''} {desc.get('product_string') or ''}".strip()
-    return name or f"{desc['vendor_id']:04x}:{desc['product_id']:04x}"
+    return va.printable(name) or f"{desc['vendor_id']:04x}:{desc['product_id']:04x}"
 
 
 def base_identity(desc: dict[str, Any], simulated: bool) -> DeviceIdentity:

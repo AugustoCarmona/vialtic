@@ -161,6 +161,9 @@ class _Planner:
     def _set_layout_option(self, change: SetLayoutOptionChange) -> None:
         labels = self.kb.layout_labels
         _capability(labels, "layout_options", "layout options")
+        if not va.layout_options_writable(labels):
+            raise VialticError("unsupported_operation", "This keyboard has a layout option with a single choice, which Vial "
+                                                        "packs inconsistently, so Vialtic will not write its layout options.")
         self._index(change.index, len(labels), "Layout option")
         self._once(("layout_option", change.index), f"layout option {change.index}")
         count = va.layout_option_count(labels[change.index])
@@ -313,6 +316,10 @@ class _Planner:
             raise VialticError("invalid_request", f"{change.system} lighting has no {', '.join(sorted(given - set(fields)))}. "
                                                   f"It takes: {', '.join(fields)}.")
         before = {name: current[name] for name in fields}
+        # Firmware also reports mode 0 for an effect with no VialRGB id, and sending 0 back turns the LEDs off.
+        if change.system == "vialrgb" and before["mode"] == 0 and change.mode is None and given:
+            raise VialticError("invalid_request", "VialRGB reports mode 0, which means off or an effect with no VialRGB id. "
+                                                  "Changing other values would turn the LEDs off, so give a mode explicitly.")
         limits = {"mode": U16}
         if change.system == "backlight":
             limits["effect"] = 1  # breathing is on or off
@@ -330,6 +337,9 @@ class _Planner:
         # Same values with a save is meaningful: it makes transient values permanent.
         if after == before and not change.save:
             return self._skip(f"{change.system} lighting")
+        if change.system == "vialrgb" and before["mode"] == 0 and after["mode"] != 0:
+            self.warnings.append("VialRGB reports mode 0, which means off or an effect with no VialRGB id. Undo can only "
+                                 "return it to mode 0, which turns the LEDs off.")
         self.operations.append(SetLightingOperation(system=change.system, before=before, after=after, save=change.save))
         self.warnings.append(LIGHTING_SAVED_NOTE if change.save else LIGHTING_TRANSIENT_NOTE)
 
@@ -524,7 +534,9 @@ def restore_blockers(current: Configuration, target: Configuration) -> list[str]
     macros = target.macros
     if "macros" not in blockers and macros.count and (
             macros.buffer_b64 is None or macros.count != current.macros.count
-            or len(va.decode_macro_buffer(macros.buffer_b64)) - macros.count > current.macros.memory_bytes):
+            # Past the end is only fine for the terminators a read adds to a buffer that lacks them.
+            or (len(va.decode_macro_buffer(macros.buffer_b64)) > current.macros.memory_bytes
+                and macros.memory_bytes != current.macros.memory_bytes)):
         blockers.append("macros")
     return blockers
 
@@ -662,8 +674,14 @@ def check_stated_values(proposal: Proposal, kb: Any) -> None:
     """What a proposal shows must be what it writes. Needs the keyboard's keycode tables active."""
     for op in proposal.operations:
         for value in after_keycodes(op):
-            if value != va.to_value(value.keycode) or value.raw != va.Keycode.deserialize(value.keycode, reraise=True):
-                raise VialticError("proposal_stale", "A keycode in this proposal resolves differently now.")
+            try:
+                same = value == va.to_value(value.keycode)
+            except Exception:
+                same = False
+            if not same:
+                raise VialticError("proposal_stale", "A keycode in this proposal resolves differently now.",
+                                   next_steps=["Create a new proposal. For a recovery, move the saved state aside by hand if "
+                                               "this keeps happening."])
         if op.type == "set_macros":
             restated = macro_buffer_operation(va.decode_macro_buffer(op.before_buffer_b64),
                                               va.decode_macro_buffer(op.after_buffer_b64), kb.macro_count, op.memory_bytes,

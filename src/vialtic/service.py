@@ -404,6 +404,9 @@ class VialticService:
 
         binding = proposal.device.binding_id
         with self.store.binding_lock(binding, self.options.lock_timeout):
+            # Again under the lock: another process may have spent this proposal while this one waited.
+            proposal = self._load_proposal(proposal_id)
+            self._check_approval(proposal, attestation)
             self.store.settle_finished_write(binding)
             if proposal.proposal_type != "recovery" and self.store.has_unresolved_write(binding):
                 self._refuse_if_unresolved(proposal.device)
@@ -577,7 +580,9 @@ class VialticService:
             # A journal this write replaces must not forget that an earlier attempt may have saved lighting.
             save_sent = interrupted.lighting_save_sent if interrupted else bool(following and following.lighting_saved)
             if interrupted:
-                self.store.delete_proposal(interrupted.proposal_id)  # It ran, so its approval is spent.
+                # It ran, so its approval is spent. A damaged id in the journal must not stop the recovery.
+                with contextlib.suppress(VialticError):
+                    self.store.delete_proposal(interrupted.proposal_id)
         else:
             self._check_previous_readable(binding)
             baseline = current.model_copy(update={"followed_by": FollowingWrite(
@@ -818,7 +823,9 @@ class VialticService:
             relocked=state.relocked, relock_error=state.relock_error, warnings=state.warnings,
             recovery_steps=["Reconnect the keyboard if needed and close other keyboard software.",
                             "Run `vialtic recover plan --json`, show the user the result and get approval.",
-                            "Run `vialtic apply <new-proposal-id> --user-approved`."])
+                            "Run `vialtic apply <new-proposal-id> --user-approved`.",
+                            f"If recovery keeps failing, check the keyboard with `vialtic view`, then move "
+                            f"{self.store.pending_path(binding)} aside by hand. Vialtic will not delete it."])
 
     @staticmethod
     def _lighting_exception(state: _ApplyState, observed: Snapshot | None) -> str:
@@ -895,6 +902,9 @@ class VialticService:
                                 with session.transport.writes():
                                     session.kb.save_rgb()
                                 must_save = False
+                                state.warnings.append("The failed write may have saved lighting, so the values read before "
+                                                      "it were saved. If those were themselves unsaved, the keyboard's saved "
+                                                      "lighting has changed; the firmware cannot report what it held before.")
                             self._relock(session, state)
                             return True, "", last_observed
                         reason = f"{len(remaining)} value(s) still differ after restoring."

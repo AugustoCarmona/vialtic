@@ -304,10 +304,12 @@ def test_colour_and_off_in_one_write(tmp_path):
     assert result.outcome == "verified" and firmware(rig).state["lighting"]["rgb_h"] == 99
 
 
-def test_colour_on_light_that_stays_off_fails_read_back(tmp_path):
+def test_colour_on_light_that_stays_off_lands_and_stays_off(tmp_path):
     rig = Rig(tmp_path, "split")
-    firmware(rig).state["lighting"]["rgb_enabled"] = False
-    assert rig.apply(plan(rig, SetLightingChange(system="rgblight", save=False, hue=99))).outcome != "verified"
+    fw = firmware(rig)
+    fw.state["lighting"]["rgb_enabled"] = False
+    assert rig.apply(plan(rig, SetLightingChange(system="rgblight", save=False, hue=99))).outcome == "verified"
+    assert fw.state["lighting"]["rgb_enabled"] is False and fw.state["lighting"]["rgb_h"] == 99
 
 
 # Finding 9: an unlock from earlier must be visible in everything that writes.
@@ -796,3 +798,208 @@ def test_firmware_that_never_ends_a_settings_query_is_bounded(tmp_path, monkeypa
     with pytest.raises(VialticError) as error:
         rig.service.read_snapshot()
     assert error.value.code == "malformed_device_data"
+
+
+# Third review.
+
+def _unmapped_effect(rig):
+    firmware(rig).state["lighting"].update(mode=0)
+
+
+def test_vialrgb_mode_zero_is_not_rewritten_unless_named(tmp_path):
+    rig = Rig(tmp_path, "full")
+    _unmapped_effect(rig)
+    packets = rig.write_packets()
+    with pytest.raises(VialticError) as error:
+        plan(rig, SetLightingChange(system="vialrgb", save=True, speed=200))
+    assert error.value.code == "invalid_request" and "give a mode" in error.value.message
+    assert rig.write_packets() == packets
+
+
+def test_vialrgb_save_of_current_values_sends_no_mode(tmp_path):
+    rig = Rig(tmp_path, "full")
+    _unmapped_effect(rig)
+    seen = []
+    rig.backend.packet_hook = seen.append
+    assert rig.apply(plan(rig, SetLightingChange(system="vialrgb", save=True))).outcome == "verified"
+    assert not [p for p in seen if p[0] == va.proto.CMD_VIA_LIGHTING_SET_VALUE]
+
+
+def test_vialrgb_leaving_mode_zero_warns_that_undo_turns_off(tmp_path):
+    rig = Rig(tmp_path, "full")
+    _unmapped_effect(rig)
+    assert any("turns the LEDs off" in w for w in plan(rig, SetLightingChange(system="vialrgb", save=False, mode=2)).warnings)
+
+
+@pytest.mark.parametrize("start_mode, change", [(2, dict(mode=0, hue=99)), (0, dict(mode=0, hue=99)), (2, dict(mode=0, speed=9))])
+def test_vialrgb_values_land_on_the_way_to_off(tmp_path, start_mode, change):
+    rig = Rig(tmp_path, "full")
+    fw = firmware(rig)
+    fw.state["lighting"]["mode"] = start_mode
+    assert rig.apply(plan(rig, SetLightingChange(system="vialrgb", save=False, **change))).outcome == "verified"
+    assert fw.state["lighting"]["mode"] == 0
+
+
+def test_resaving_after_a_failed_save_says_saved_lighting_changed(tmp_path):
+    rig = Rig(tmp_path, "full")
+    firmware(rig).state["lighting"]["v"] = 50  # transient
+    _losing_save_answers(rig, 1)
+    result = rig.apply(plan(rig, SetLightingChange(system="vialrgb", save=True, value=99)))
+    assert result.outcome == "failed_restored" and any("saved lighting has changed" in w for w in result.warnings)
+
+
+def test_lighting_that_cannot_be_restored_while_off_no_longer_loops(tmp_path):
+    rig = Rig(tmp_path, "split", Faults(disconnect_after_writes=0, reconnect_after_seconds=0.0), reconnect_window=0.05)
+    fw = firmware(rig)
+    fw.state["lighting"].update(rgb_enabled=False, rgb_h=100)
+    fw.state["lighting_saved"].update(rgb_enabled=False, rgb_h=32)
+    proposal = plan(rig, SetLightingChange(system="rgblight", save=False, effect=2))
+    result = rig.apply(proposal)
+    assert result.outcome in ("failed_restored", "partial", "unknown")
+    if result.outcome != "failed_restored":
+        assert any("move" in step and "aside" in step for step in result.recovery_steps)
+        again = rig.restart()
+        assert again.apply(again.service.create_recovery_proposal(None)).outcome == "verified"
+
+
+def test_backup_too_big_for_a_rebuilt_firmware_blocks_undo(make_rig):
+    rig = make_rig("full")
+    fw = firmware(rig)
+    fw.macro[:] = b"a" * 57 + b"\x00\x00\x00\x00" + bytes(3)
+    fw.sync()
+    assert rig.apply(plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z"))).outcome == "verified"
+    fw.spec = dataclasses.replace(fw.spec, macro_memory=60)
+    fw.macro[:] = bytes(60)
+    with pytest.raises(VialticError) as error:
+        rig.service.create_undo_proposal(None)
+    assert error.value.code == "restore_unsupported" and error.value.details["families"] == ["macros"]
+
+
+def test_second_apply_waiting_on_the_lock_cannot_replay_a_spent_proposal(tmp_path):
+    rig = Rig(tmp_path, "full", Faults(settings_status_fail=(7,)))
+    proposal = plan(rig, SetQmkSettingChange(qsid=7, value=1))
+    attestation = rig.approve(proposal)
+    assert rig.service.apply_proposal(proposal.id, attestation).outcome == "failed_restored"
+    original = rig.store.binding_lock
+
+    def already_loaded_elsewhere(*args):
+        return original(*args)
+
+    rig.store.binding_lock = already_loaded_elsewhere
+    loaded = [proposal]
+    real_load = rig.service._load_proposal
+
+    def first_load_succeeds(proposal_id):
+        return loaded.pop() if loaded else real_load(proposal_id)
+
+    rig.service._load_proposal = first_load_succeeds
+    with pytest.raises(VialticError) as error:
+        rig.service.apply_proposal(proposal.id, attestation)
+    assert error.value.code == "proposal_not_found"
+
+
+@pytest.mark.parametrize("text", ["OSM(0x40)", "OSM(0x20)", "OSM(0x80)", "OSM(MOD_LCTL | 0x20)"])
+def test_osm_argument_that_does_not_fit_is_refused(tmp_path, text):
+    rig = Rig(tmp_path, "full")
+    with pytest.raises(VialticError) as error:
+        plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode=text))
+    assert error.value.code == "invalid_keycode"
+
+
+def test_damaged_baseline_cannot_replace_a_good_previous(make_rig):
+    class Crash(BaseException):
+        pass
+
+    rig = make_rig("full")
+    first = plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z"))
+    rig.apply(first)
+    binding = first.device.binding_id
+    previous = rig.store.previous_path(binding).read_bytes()
+    second = plan(rig, SetKeyChange(layer=0, row=1, col=0, keycode="KC_Y"))
+    original = rig.store.finish_write
+
+    def dies(*args):
+        raise Crash
+
+    rig.store.finish_write = dies
+    with pytest.raises(Crash):
+        rig.apply(second)
+    rig.store.finish_write = original
+    rig.store.pending_path(binding).write_text("{corrupt")
+    assert rig.restart().service.read_snapshot()
+    assert rig.store.previous_path(binding).read_bytes() == previous
+    assert rig.store.pending_path(binding).exists()
+
+
+def test_stored_proposal_with_a_naive_time_does_not_stop_planning(tmp_path):
+    rig = Rig(tmp_path, "full")
+    proposal = plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z"))
+    path = rig.store.root / "proposals" / f"{proposal.id}.json"
+    data = json.loads(path.read_text())
+    data["expires_at"] = "2030-01-01T00:00:00"
+    path.write_text(json.dumps(data))
+    assert plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Y")).operations
+
+
+def test_journal_with_a_damaged_id_does_not_stop_recovery(make_rig):
+    class Crash(BaseException):
+        pass
+
+    rig = make_rig("full")
+    proposal = plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z"))
+    original = rig.service._write_operation
+
+    def dies(session, op):
+        original(session, op)
+        raise Crash
+
+    rig.service._write_operation = staticmethod(dies)
+    with pytest.raises(Crash):
+        rig.apply(proposal)
+    path = rig.store.journal_path(proposal.device.binding_id)
+    data = json.loads(path.read_text())
+    data["proposal_id"] = "../../evil"
+    path.write_text(json.dumps(data))
+    restarted = rig.restart()
+    assert restarted.apply(restarted.service.create_recovery_proposal(None)).outcome == "verified"
+
+
+def test_unresolvable_name_in_a_backup_is_refused_before_writing(make_rig):
+    class Crash(BaseException):
+        pass
+
+    rig = make_rig("full")
+    proposal = plan(rig, SetKeyChange(layer=0, row=0, col=0, keycode="KC_Z"))
+    original = rig.service._write_operation
+
+    def dies(session, op):
+        original(session, op)
+        raise Crash
+
+    rig.service._write_operation = staticmethod(dies)
+    with pytest.raises(Crash):
+        rig.apply(proposal)
+    path = rig.store.pending_path(proposal.device.binding_id)
+    data = json.loads(path.read_text())
+    next(e for e in data["configuration"]["keymap"] if (e["layer"], e["row"], e["col"]) == (0, 0, 0))["keycode"] = "KC_RENAMED"
+    path.write_text(json.dumps(data))
+    restarted = rig.restart()
+    recovery = restarted.service.create_recovery_proposal(None)
+    with pytest.raises(VialticError) as error:
+        restarted.apply(recovery)
+    assert error.value.code == "proposal_stale" and path.exists()
+
+
+def test_single_choice_layout_option_is_refused(tmp_path):
+    rig = Rig(tmp_path, "full")
+    labels = firmware(rig).spec.definition["layouts"]["labels"]
+    assert va.layout_options_writable(labels)
+    assert not va.layout_options_writable(["t", ["s", "only"]])
+
+
+def test_firmware_strings_cannot_reach_the_terminal_as_control_sequences(tmp_path):
+    assert va.printable("a\x1b[31mb\x07") == "a?[31mb?"
+    rig = Rig(tmp_path, "full")
+    original = rig.backend.enumerate
+    rig.backend.enumerate = lambda: [{**d, "product_string": "x\x1b]0;pwn\x07"} for d in original()]
+    assert "\x1b" not in rig.service.list_devices().devices[0].identity.name

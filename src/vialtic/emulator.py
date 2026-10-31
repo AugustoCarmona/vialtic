@@ -364,7 +364,9 @@ class Firmware:
             # Like the firmware: unknown effects are ignored and brightness is clamped.
             if mode == 0 or mode in VIALRGB_EFFECTS:
                 light["mode"] = mode
-            light["speed"], light["h"], light["s"], light["v"] = speed, hue, saturation, min(value, VIALRGB_MAX_BRIGHTNESS)
+            # rgb_matrix ignores speed and colour while disabled.
+            if light["mode"] != 0:
+                light["speed"], light["h"], light["s"], light["v"] = speed, hue, saturation, min(value, VIALRGB_MAX_BRIGHTNESS)
 
     def _vial(self, msg: bytes, resp: bytearray) -> None:
         sub = msg[1]

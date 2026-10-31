@@ -169,6 +169,11 @@ def activate(kb: Keyboard) -> None:
 
 # Display.
 
+def printable(text: str) -> str:
+    """Firmware supplies these strings, and they must not reach a terminal as control sequences."""
+    return "".join(ch if ch.isprintable() else "?" for ch in text)
+
+
 def display_label(keycode: str) -> str:
     """Short, ASCII-safe label. Transparent and disabled keys stay distinguishable."""
     if keycode == "KC_TRNS":
@@ -177,7 +182,7 @@ def display_label(keycode: str) -> str:
         return "XXX"
     if keycode.startswith("USER"):
         label = Keycode.label(keycode).replace("\n", " ")
-        if label.isascii():
+        if label.isascii() and label.isprintable():
             return label
     return keycode.replace("KC__", "KC_").replace("KC_", "")
 
@@ -261,7 +266,8 @@ def _check_argument_limits(name: str, node: ast.Call, parameters: list, text: st
     tap = name in ("MT", "LT") or name.endswith("_T") or re.fullmatch(r"LT\d+", name) is not None
     for parameter, arg in zip(parameters, node.args):
         limit = {"kc": 0xFF if tap else 0x1FFF, "layer": 0xF if name in ("LT", "LM") else 0xFF, "n": 0xFF,
-                 "mod": 0x1F if name == "MT" else Keycode.resolve("QMK_LM_MASK") if name == "LM" else 0xFF}[parameter.name]
+                 "mod": 0x1F if name == "MT" or (name == "OSM" and Keycode.protocol == 6)
+                 else Keycode.resolve("QMK_LM_MASK") if name == "LM" else 0xFF}[parameter.name]
         try:
             value = Keycode.deserialize(ast.unparse(arg), reraise=True)
         except Exception as exc:
@@ -357,7 +363,8 @@ def list_keycodes(query: str | None = None) -> list[KeycodeInfo]:
     for kc in keycode_tables.KEYCODES:
         if kc.hidden or kc in keycode_tables.KEYCODES_HIDDEN:
             continue
-        info = KeycodeInfo(keycode=kc.qmk_id, label=kc.label.replace("\n", " "), description=kc.tooltip,
+        info = KeycodeInfo(keycode=kc.qmk_id, label=printable(kc.label.replace("\n", " ")),
+                           description=printable(kc.tooltip) if kc.tooltip else kc.tooltip,
                            masked=kc.masked, aliases=[a for a in kc.alias if a != kc.qmk_id])
         if needle is None or needle in " ".join([info.keycode, info.label, info.description or "", *info.aliases]).lower():
             out.append(info)
@@ -386,6 +393,11 @@ def layout_choices(labels, value: int) -> list[int]:
         bits = bits[:-size]
     choices.reverse()
     return choices
+
+
+def layout_options_writable(labels) -> bool:
+    """Upstream's writer gives a select with one choice one bit and its reader none, so nothing can pack them safely."""
+    return not any(isinstance(item, list) and len(item) == 2 for item in labels)
 
 
 def layout_option_count(item) -> int:
@@ -736,12 +748,10 @@ def _write_rgblight(kb: Keyboard, effect: int, after: dict[str, int], changed: s
             kb.set_qmk_rgblight_effect(wanted)
         return wanted
 
-    if changed & {"brightness", "hue", "saturation"} and (effect != 0 or after["effect"] != 0):
+    if changed & {"brightness", "hue", "saturation"}:
         if effect != RGBLIGHT_STATIC:
             effect = set_effect(effect, RGBLIGHT_STATIC)
         kb.set_qmk_rgblight_color(after["hue"], after["saturation"], after["brightness"])
-    elif changed & {"brightness", "hue", "saturation"}:
-        kb.set_qmk_rgblight_color(after["hue"], after["saturation"], after["brightness"])  # read-back reports it stayed off
     if "effect_speed" in changed:
         kb.set_qmk_rgblight_effect_speed(after["effect_speed"])
     if effect != after["effect"]:
@@ -759,9 +769,12 @@ def _write_lighting(kb: Keyboard, op) -> None:
         if "effect" in changed:
             kb.set_qmk_backlight_effect(after["effect"])
     else:
-        # Firmware may ignore colour while off, so a colour change on the way off goes first.
-        if after["mode"] == 0 and op.before["mode"] != 0 and changed & {"hue", "saturation", "value"}:
-            kb.rgb_mode, kb.rgb_speed = op.before["mode"], after["speed"]
+        if not changed:
+            return  # A save of the current values: nothing to send, and mode 0 here could turn the LEDs off.
+        # Firmware ignores speed and colour while off, so going to or staying at off passes through an effect.
+        bridge = op.before["mode"] or min((effect for effect in kb.rgb_supported_effects if effect), default=0)
+        if after["mode"] == 0 and bridge and changed & {"speed", "hue", "saturation", "value"}:
+            kb.rgb_mode, kb.rgb_speed = bridge, after["speed"]
             kb.set_vialrgb_color(after["hue"], after["saturation"], after["value"])
         # One packet carries all VialRGB values, so set the two fields upstream's setter does not.
         kb.rgb_mode, kb.rgb_speed = after["mode"], after["speed"]

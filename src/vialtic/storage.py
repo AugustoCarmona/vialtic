@@ -177,7 +177,7 @@ class Store:
         for path in directory.glob("*.json"):
             try:
                 proposal = Proposal.model_validate_json(path.read_bytes())
-                if proposal.expires_at <= now:
+                if proposal.created_at.tzinfo is None or proposal.expires_at.tzinfo is None or proposal.expires_at <= now:
                     path.unlink()
                 else:
                     remaining.append((proposal.created_at, path))
@@ -252,10 +252,13 @@ class Store:
             return
         try:
             journal = self.read_journal(binding_id)
+            if journal is None or journal.status != "verified":
+                return
+            # A damaged baseline must not replace a good previous.json.
+            if journal.proposal_type != "recovery":
+                self.read_snapshot(self.pending_path(binding_id))
         except VialticError:
             return  # Unreadable metadata stays pending; `recover plan` can still resolve it.
-        if journal is None or journal.status != "verified":
-            return
         self.finish_write(binding_id, journal.proposal_type)
 
     def finish_write(self, binding_id: str, proposal_type: str) -> None:
