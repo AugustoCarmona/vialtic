@@ -51,9 +51,11 @@ from keycodes import keycodes as keycode_tables  # noqa: E402
 from keycodes.keycodes import RESET_KEYCODE, Keycode, recreate_keyboard_keycodes  # noqa: E402
 from any_keycode import AnyKeycode, functions as ANY_KEYCODE_FUNCTIONS  # noqa: E402
 from editor.qmk_settings import QmkSettings  # noqa: E402
+from macro.macro_action import ActionDelay, ActionDown, ActionTap, ActionText, ActionUp  # noqa: E402
 from protocol import constants as proto  # noqa: E402
 from protocol.alt_repeat_key import AltRepeatKeyEntry  # noqa: E402
 from protocol.key_override import KeyOverrideEntry  # noqa: E402
+from protocol.macro import macro_deserialize_v1, macro_deserialize_v2  # noqa: E402
 from protocol.keyboard_comm import (  # noqa: E402
     SUPPORTED_VIA_PROTOCOL, SUPPORTED_VIAL_PROTOCOL, Keyboard, ProtocolError,
 )
@@ -82,7 +84,7 @@ CHECKED_FAMILIES = [
 ]
 ALL_FAMILIES = CHECKED_FAMILIES + ["lighting"]
 RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options", "tap_dance", "combos", "key_overrides", "alt_repeat_keys",
-                       "settings"}
+                       "settings", "macros"}
 
 
 class HeadlessKeyboard(Keyboard):
@@ -406,7 +408,7 @@ def writable_operations(kb: Keyboard) -> list[str]:
     available = {"set_key": True, "set_encoder": bool(kb.encoder_count), "set_layout_option": bool(kb.layout_labels),
                  "set_tap_dance": bool(kb.tap_dance_count), "set_combo": bool(kb.combo_count),
                  "set_key_override": bool(kb.key_override_count), "set_alt_repeat_key": bool(kb.alt_repeat_key_count),
-                 "set_qmk_setting": bool(set(kb.settings))}
+                 "set_qmk_setting": bool(set(kb.settings)), "set_macro": bool(kb.macro_count and kb.macro_memory)}
     return [name for name, present in available.items() if present]
 
 
@@ -507,6 +509,89 @@ def coverage_of(kb: Keyboard, config: Configuration) -> dict[str, str]:
     }
 
 
+# Macros. The buffer is NUL-separated, so anything that adds or loses a zero byte moves every later macro.
+
+MACRO_TEXT_BYTES = frozenset(range(0x20, 0x7F)) | {0x09, 0x0A}
+MAX_MACRO_DELAY = 254 * 255 + 254  # encoded in two bytes that may not be zero
+
+
+def _macro_error(index: int, position: int, why: str) -> VialticError:
+    """Says what is wrong without repeating the contents, which must not reach output."""
+    return VialticError("invalid_request", f"Macro {index}, action {position}: {why}")
+
+
+def _macro_keycodes(kb: Keyboard, index: int, position: int, codes: list) -> list[str]:
+    names = []
+    for code in codes:
+        if not isinstance(code, str):
+            raise _macro_error(index, position, "keycodes must be text")
+        try:
+            value, _ = parse_keycode(kb, code)
+        except VialticError as exc:
+            raise _macro_error(index, position, f"invalid keycode ({exc.code})") from None
+        if value.raw == 0:
+            raise _macro_error(index, position, "KC_NO would encode a zero byte, which ends the macro")
+        if value.raw > 0xFF and kb.vial_protocol < proto.VIAL_PROTOCOL_EXT_MACROS:
+            raise _macro_error(index, position, f"keycodes above 8 bits need Vial protocol {proto.VIAL_PROTOCOL_EXT_MACROS}")
+        if value.raw > 0xFF00:
+            raise _macro_error(index, position, "this keycode cannot be encoded in a macro")
+        names.append(value.keycode)
+    return names
+
+
+def encode_macro(kb: Keyboard, index: int, actions: list) -> tuple[bytes, list[str]]:
+    """Strictly encode one macro, proving the bytes parse back to themselves. Returns bytes and warnings."""
+    built = []
+    warnings = []
+    for position, action in enumerate(actions):
+        tag = action[0] if action else None
+        if tag == "text":
+            if len(action) != 2 or not isinstance(action[1], str):
+                raise _macro_error(index, position, "text takes one string")
+            if any(ord(ch) not in MACRO_TEXT_BYTES for ch in action[1]):
+                raise _macro_error(index, position, "text may only hold printable ASCII, tabs and newlines")
+            built.append(ActionText(action[1]))
+        elif tag in ("tap", "down", "up"):
+            if len(action) < 2:
+                raise _macro_error(index, position, f"{tag} needs at least one keycode")
+            names = _macro_keycodes(kb, index, position, action[1:])
+            if RESET_KEYCODE in names:
+                warnings.append(f"Macro {index} contains {RESET_KEYCODE}, which puts the keyboard into bootloader mode.")
+            built.append({"tap": ActionTap, "down": ActionDown, "up": ActionUp}[tag](names))
+        elif tag == "delay":
+            if kb.vial_protocol < proto.VIAL_PROTOCOL_ADVANCED_MACROS:
+                raise _macro_error(index, position, f"delays need Vial protocol {proto.VIAL_PROTOCOL_ADVANCED_MACROS}")
+            if len(action) != 2 or isinstance(action[1], bool) or not isinstance(action[1], int) \
+                    or not 0 <= action[1] <= MAX_MACRO_DELAY:
+                raise _macro_error(index, position, f"delay takes one number from 0 to {MAX_MACRO_DELAY}")
+            built.append(ActionDelay(action[1]))
+        else:
+            raise _macro_error(index, position, "the action must be text, tap, down, up or delay")
+    data = kb.macro_serialize(built)
+    if b"\x00" in data or kb.macro_serialize(kb.macro_deserialize(data)) != data:
+        raise VialticError("invalid_request", f"Macro {index} cannot be encoded without changing its meaning.")
+    return data, warnings
+
+
+def macro_segments(buffer: bytes, count: int) -> list[bytes]:
+    """The raw bytes of each macro, exactly as upstream's read cleans the buffer into."""
+    return (buffer.split(b"\x00") + [b""] * count)[:count]
+
+
+def writable_macro_bytes(buffer: bytes, memory: int) -> bytes:
+    """What to send to reproduce a read buffer.
+
+    With too few terminators on the keyboard, upstream's read adds them past the end of the
+    memory. Only those are dropped here, and reading the result gives the same buffer back.
+    """
+    return buffer[:memory]
+
+
+def macro_preview(segment: bytes, vial_protocol: int) -> list:
+    decode = macro_deserialize_v2 if vial_protocol >= proto.VIAL_PROTOCOL_ADVANCED_MACROS else macro_deserialize_v1
+    return [action.save() for action in decode(segment)]
+
+
 KEY_OVERRIDE_KNOWN_OPTIONS = 0b10111111
 ALT_REPEAT_KNOWN_OPTIONS = 0b00001111
 
@@ -601,6 +686,10 @@ def write_operation(kb: Keyboard, op) -> None:
         status = kb.qmk_settings_set(op.qsid, op.after)
         if status != 0:
             raise RuntimeError(f"the firmware refused QMK setting {op.qsid} (status {status})")
+    elif op.type == "set_macros":
+        if kb.get_unlock_status() != 1:
+            raise UnlockRequired("the keyboard must be physically unlocked for this write")
+        kb.set_macro(writable_macro_bytes(base64.b64decode(op.after_buffer_b64), kb.macro_memory))
     else:
         raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 

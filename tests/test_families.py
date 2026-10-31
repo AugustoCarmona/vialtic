@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """M3 gate: each family is read, validated, proposed, applied, verified, backed up and restored."""
+import base64
 import json
-import stat
 
 import pytest
 
@@ -11,7 +11,7 @@ from vialtic.emulator import Faults
 from vialtic.errors import VialticError
 from vialtic.models import (
     ChangeSet, SetAltRepeatKeyChange, SetComboChange, SetKeyChange, SetKeyOverrideChange, SetLayoutOptionChange,
-    SetQmkSettingChange, SetTapDanceChange,
+    SetMacroChange, SetQmkSettingChange, SetTapDanceChange,
 )
 from vialtic.service import attestation_for
 
@@ -448,3 +448,227 @@ def test_unreadable_setting_is_reported_and_refused(tmp_path):
     assert snapshot.coverage["settings"] == "partial_unreadable_qsids"
     assert any("refused to report" in w for w in snapshot.warnings)
     assert refused(rig, "unsupported_operation", SetQmkSettingChange(qsid=7, value=1)).details["qsid"] == 7
+
+
+# Macros.
+
+# Bytes the parsed form cannot round-trip: a stray prefix pair, a byte >= 0x80, an unterminated command.
+HOSTILE = [b"hi\x01\x7Fthere", b"caf\xE9", b"\x01\x09junk", b"ok"]
+
+
+def _set_buffer(rig, segments):
+    fw = firmware(rig)
+    data = b"\x00".join(segments) + b"\x00"
+    fw.macro[:len(data)] = data
+    fw.sync()
+    return data
+
+
+def _buffer(rig, length):
+    return bytes(firmware(rig).macro[:length])
+
+
+def _macro_used(rig):
+    fw = firmware(rig)
+    return b"\x00".join(bytes(fw.macro).split(b"\x00")[:fw.spec.macro_count]) + b"\x00"
+
+
+def test_macro_cycle(tmp_path):
+    rig = full(tmp_path)
+    proposal = plan(rig, SetMacroChange(index=1, actions=[["text", "hello"], ["tap", "KC_A", "LCTL(KC_B)"], ["delay", 100]]))
+    assert proposal.unlock.required, "firmware only takes macro writes while unlocked"
+    assert [item.index for item in proposal.operations[0].changed] == [1]
+    check_family_cycle(rig, proposal, lambda: _macro_used(rig), "macros")
+
+
+def test_macro_written_bytes_match_upstream_encoding(tmp_path):
+    rig = full(tmp_path)
+    rig.apply(plan(rig, SetMacroChange(index=0, actions=[["text", "a"], ["down", "KC_B"], ["up", "KC_B"], ["delay", 256],
+                                                         ["tap", "LCTL(KC_A)"]])))
+    expected = b"a\x01\x02\x05\x01\x03\x05\x01\x04\x02\x02\x01\x05\x04\x01"
+    assert _macro_used(rig).split(b"\x00")[0] == expected
+    preview = rig.service.read_snapshot().configuration.macros.macros[0]
+    assert preview[0] == ["text", "a"] and preview[-1] == ["tap", "LCTL(KC_A)"]
+
+
+def test_macro_edit_leaves_malformed_neighbours_intact(tmp_path):
+    rig = full(tmp_path)
+    _set_buffer(rig, HOSTILE)
+    proposal = plan(rig, SetMacroChange(index=3, actions=[["text", "new"]]))
+    assert [item.index for item in proposal.operations[0].changed] == [3]
+    assert rig.apply(proposal).outcome == "verified"
+    assert _macro_used(rig).split(b"\x00")[:4] == HOSTILE[:3] + [b"new"]
+
+
+def test_macro_undo_restores_raw_bytes_not_the_parsed_form(tmp_path):
+    rig = full(tmp_path)
+    original = _set_buffer(rig, HOSTILE)
+    rig.apply(plan(rig, SetMacroChange(index=0, actions=[])))
+    undo(rig)
+    assert _buffer(rig, len(original)) == original
+
+
+def test_buffer_without_enough_terminators_restores_exactly(tmp_path):
+    """Upstream's cleanup adds terminators past the end of memory; only those may be left out."""
+    rig = full(tmp_path)
+    fw = firmware(rig)
+    memory = fw.spec.macro_memory
+    raw = b"a\x00" + b"z" * (memory - 2)
+    fw.macro[:] = raw
+    snapshot = rig.service.read_snapshot()
+    assert base64.b64decode(snapshot.configuration.macros.buffer_b64) == raw + b"\x00" * 3
+    assert rig.apply(rig.plan((0, 0, 0, "KC_Z"))).outcome == "verified"
+    fw.macro[:] = bytes(memory)
+    fw.sync()
+    undo_plan = rig.service.create_undo_proposal(None)
+    assert rig.apply(undo_plan).outcome == "verified"
+    assert bytes(fw.macro) == raw
+
+
+def test_macro_capacity_is_refused_not_truncated(tmp_path):
+    rig = full(tmp_path)
+    error = refused(rig, "capacity_exceeded", SetMacroChange(index=0, actions=[["text", "x" * 61]]))
+    assert error.details == {"needed_bytes": 65, "memory_bytes": 64}
+    assert rig.apply(plan(rig, SetMacroChange(index=0, actions=[["text", "x" * 60]]))).outcome == "verified"
+
+
+def test_macro_capacity_counts_the_macros_it_keeps(tmp_path):
+    rig = full(tmp_path)
+    _set_buffer(rig, [b"y" * 50, b"", b"", b""])
+    refused(rig, "capacity_exceeded", SetMacroChange(index=1, actions=[["text", "x" * 11]]))
+
+
+@pytest.mark.parametrize("actions", [
+    [["text", "a\x00b"]], [["text", "a\x01b"]], [["text", "caf\u00e9"]], [["text"]], [["text", 3]], [["tap"]], [[]],
+    [["tap", "KC_NO"]], [["tap", "KC_NOPE"]], [["tap", 4]], [["delay", -1]], [["delay", 65025]], [["delay", True]],
+    [["delay", "9"]], [["unknown", 1]], [["tap", "0xFF01"]], [["down", "MO(9)"]],
+])
+def test_macro_validation(tmp_path, actions):
+    rig = full(tmp_path)
+    error = refused(rig, "invalid_request", SetMacroChange(index=0, actions=actions))
+    assert "NOPE" not in error.message and "caf" not in error.message, "errors must not repeat macro contents"
+
+
+def test_macro_index_and_capability(tmp_path):
+    refused(full(tmp_path), "invalid_coordinate", SetMacroChange(index=4, actions=[]))
+    error = refused(Rig(tmp_path / "m", "minimal"), "capability_unavailable", SetMacroChange(index=0, actions=[]))
+    assert error.details["family"] == "macros"
+
+
+def test_macro_protocol_limits(tmp_path):
+    rig = Rig(tmp_path, "vintage")
+    assert "delays need" in refused(rig, "invalid_request", SetMacroChange(index=0, actions=[["delay", 5]])).message
+    assert "above 8 bits" in refused(rig, "invalid_request", SetMacroChange(index=0, actions=[["tap", "LCTL(KC_A)"]])).message
+    assert rig.apply(plan(rig, SetMacroChange(index=0, actions=[["text", "a"], ["tap", "KC_B"]]))).outcome == "verified"
+    assert _macro_used(rig).split(b"\x00")[0] == b"a\x01\x05"
+
+
+def test_macro_failure_midway_restores_the_whole_buffer(tmp_path):
+    rig = full(tmp_path, Faults(timeout_after_writes=1))
+    original = _set_buffer(rig, HOSTILE)
+    proposal = plan(rig, SetMacroChange(index=3, actions=[["text", "z" * 40]]))
+    result = rig.apply(proposal)
+    assert result.outcome != "verified" and rig.store.pending_path(proposal.device.binding_id).exists()
+    assert not rig.store.previous_path(proposal.device.binding_id).exists()
+    restarted = rig.restart()
+    firmware(restarted).state["unlocked"] = False
+    recovery = restarted.service.create_recovery_proposal(None)
+    assert recovery.unlock.required
+    assert restarted.apply(recovery).outcome == "verified"
+    assert _buffer(restarted, len(original)) == original
+
+
+def test_macro_restore_after_replug_needs_the_unlock_nobody_can_do_then(tmp_path):
+    """The firmware locks on replug, so automatic restore stops and recovery asks for the unlock."""
+    rig = full(tmp_path, Faults(disconnect_after_writes=1, reconnect_after_seconds=0.0), reconnect_window=5.0)
+    original = _set_buffer(rig, HOSTILE)
+    proposal = plan(rig, SetMacroChange(index=3, actions=[["text", "z" * 40]]))
+    result = rig.apply(proposal)
+    assert result.outcome == "partial" and "physical unlock" in result.message
+    assert any("recover plan" in step for step in result.recovery_steps)
+    binding = proposal.device.binding_id
+    assert rig.store.pending_path(binding).exists()
+
+    restarted = rig.restart()
+    with pytest.raises(VialticError) as error:
+        restarted.plan((0, 0, 0, "KC_Z"))
+    assert error.value.code == "recovery_pending"
+    recovery = restarted.service.create_recovery_proposal(None)
+    assert recovery.unlock.required and recovery.unlock.positions
+    assert restarted.apply(recovery).outcome == "verified"
+    assert _buffer(restarted, len(original)) == original and not restarted.store.has_unresolved_write(binding)
+
+
+def test_refused_recovery_unlock_keeps_the_backup_and_the_way_out(tmp_path):
+    rig = full(tmp_path, Faults(disconnect_after_writes=1, reconnect_after_seconds=0.0), reconnect_window=5.0)
+    _set_buffer(rig, HOSTILE)
+    proposal = plan(rig, SetMacroChange(index=3, actions=[["text", "z" * 40]]))
+    rig.apply(proposal)
+    binding = proposal.device.binding_id
+    stuck = Rig(rig.tmp_path, "full", Faults(unlock_never=True), unlock_timeout=0.02)
+    recovery = stuck.service.create_recovery_proposal(None)
+    with pytest.raises(VialticError) as error:
+        stuck.apply(recovery)
+    assert error.value.code == "unlock_timeout"
+    assert stuck.store.pending_path(binding).exists(), "the backup survives a failed unlock"
+    fine = rig.restart()
+    assert fine.apply(fine.service.create_recovery_proposal(None)).outcome == "verified"
+
+
+def test_macro_contents_stay_out_of_default_output(tmp_path, capsys, monkeypatch):
+    from vialtic import cli
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    secret = "hunter2secret"
+    changes = tmp_path / "changes.json"
+    changes.write_text(json.dumps({"schema_version": 1, "changes": [{"type": "set_macro", "index": 0, "actions": [["text", secret]]}]}))
+    em = ("--emulator", "full")
+    outputs = []
+
+    def run(*argv):
+        code = cli.main([*argv, *em])
+        captured = capsys.readouterr()
+        outputs.append(captured.out + captured.err)
+        return code, captured.out
+
+    code, out = run("plan", "--changes", str(changes), "--json")
+    proposal_id = json.loads(out)["result"]["id"]
+    assert code == 0
+    assert run("proposal", "show", proposal_id)[0] == 0
+    assert run("proposal", "show", proposal_id, "--json")[0] == 0
+    assert "--include-macros" in outputs[-2]
+    encoded = base64.b64encode(secret.encode()).decode()
+    assert run("view", "--proposal", proposal_id)[0] == 0
+    assert run("apply", proposal_id, "--user-approved", "--json")[0] == 0
+    assert run("snapshot", "--json")[0] == 0
+    code, out = run("undo", "plan", "--json")
+    assert run("proposal", "show", json.loads(out)["result"]["id"], "--json")[0] == 0
+    for text in outputs:
+        assert secret not in text and encoded[:10] not in text
+
+    code, out = run("undo", "plan")
+    undo_id = [line for line in out.splitlines() if line.startswith("Proposal ")][0].split()[1]
+    assert secret in run("proposal", "show", undo_id, "--include-macros")[1]
+
+
+def test_macro_proposal_binds_the_exact_buffer(tmp_path):
+    rig = full(tmp_path)
+    proposal = plan(rig, SetMacroChange(index=0, actions=[["text", "a"]]))
+    path = rig.store.root / "proposals" / f"{proposal.id}.json"
+    data = json.loads(path.read_text())
+    data["operations"][0]["after_buffer_b64"] = base64.b64encode(b"evil\x00\x00\x00\x00").decode()
+    path.write_text(json.dumps(data))
+    with pytest.raises(VialticError) as error:
+        rig.service.get_proposal(proposal.id)
+    assert error.value.code == "proposal_tampered"
+
+
+def test_macro_files_are_owner_only(tmp_path):
+    rig = full(tmp_path)
+    proposal = plan(rig, SetMacroChange(index=0, actions=[["text", "a"]]))
+    path = rig.store.root / "proposals" / f"{proposal.id}.json"
+    assert path.stat().st_mode & 0o777 == 0o600
+    rig.apply(proposal)
+    assert rig.store.previous_path(proposal.device.binding_id).stat().st_mode & 0o777 == 0o600

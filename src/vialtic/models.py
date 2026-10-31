@@ -318,8 +318,18 @@ class SetQmkSettingChange(Model):
     enabled: bool | None = None
 
 
+class SetMacroChange(Model):
+    """Replace one macro. `actions` holds ["text", "abc"], ["tap", "KC_A", ...], ["down", ...],
+    ["up", ...] or ["delay", milliseconds]. An empty list clears the macro."""
+
+    type: Literal["set_macro"] = "set_macro"
+    index: int
+    actions: list[list[Any]] = Field(max_length=4096)
+
+
 Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange, SetTapDanceChange, SetComboChange,
-                         SetKeyOverrideChange, SetAltRepeatKeyChange, SetQmkSettingChange], Field(discriminator="type")]
+                         SetKeyOverrideChange, SetAltRepeatKeyChange, SetQmkSettingChange, SetMacroChange],
+                   Field(discriminator="type")]
 
 
 class ChangeSet(Envelope):
@@ -421,8 +431,33 @@ class SetQmkSettingOperation(Model):
     after: int
 
 
+class MacroChangeSummary(Model):
+    """One macro the buffer write changes. `before` and `after` are a parsed preview for people;
+    they can hide malformed bytes, and the buffers below are what is written."""
+
+    index: int
+    before_bytes: int
+    after_bytes: int
+    before: list[list[Any]] | None = None
+    after: list[list[Any]] | None = None
+
+
+class SetMacrosOperation(Model):
+    """Macros are one firmware buffer, written whole. Contents are removed from default output."""
+
+    type: Literal["set_macros"] = "set_macros"
+    changed: list[MacroChangeSummary]
+    memory_bytes: int
+    before_used_bytes: int
+    after_used_bytes: int
+    before_buffer_b64: str | None = None
+    after_buffer_b64: str | None = None
+    redacted: bool = False
+
+
 Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation, SetLayoutOptionsOperation, SetTapDanceOperation,
-                            SetComboOperation, SetKeyOverrideOperation, SetAltRepeatKeyOperation, SetQmkSettingOperation],
+                            SetComboOperation, SetKeyOverrideOperation, SetAltRepeatKeyOperation, SetQmkSettingOperation,
+                            SetMacrosOperation],
                       Field(discriminator="type")]
 
 

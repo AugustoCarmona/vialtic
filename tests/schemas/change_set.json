@@ -319,6 +319,37 @@
       "title": "SetLayoutOptionChange",
       "type": "object"
     },
+    "SetMacroChange": {
+      "additionalProperties": false,
+      "description": "Replace one macro. `actions` holds [\"text\", \"abc\"], [\"tap\", \"KC_A\", ...], [\"down\", ...],\n[\"up\", ...] or [\"delay\", milliseconds]. An empty list clears the macro.",
+      "properties": {
+        "actions": {
+          "items": {
+            "items": {},
+            "type": "array"
+          },
+          "maxItems": 4096,
+          "title": "Actions",
+          "type": "array"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_macro",
+          "default": "set_macro",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "actions"
+      ],
+      "title": "SetMacroChange",
+      "type": "object"
+    },
     "SetQmkSettingChange": {
       "additionalProperties": false,
       "description": "Change one QMK setting: either the whole `value`, or one flag with `bit` and `enabled`.",
@@ -470,6 +501,7 @@
             "set_key": "#/$defs/SetKeyChange",
             "set_key_override": "#/$defs/SetKeyOverrideChange",
             "set_layout_option": "#/$defs/SetLayoutOptionChange",
+            "set_macro": "#/$defs/SetMacroChange",
             "set_qmk_setting": "#/$defs/SetQmkSettingChange",
             "set_tap_dance": "#/$defs/SetTapDanceChange"
           },
@@ -499,6 +531,9 @@
           },
           {
             "$ref": "#/$defs/SetQmkSettingChange"
+          },
+          {
+            "$ref": "#/$defs/SetMacroChange"
           }
         ]
       },

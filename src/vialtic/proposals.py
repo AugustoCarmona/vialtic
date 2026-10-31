@@ -2,6 +2,7 @@
 """Immutable proposals: validation, content-derived ids, diffs and baseline checks."""
 from __future__ import annotations
 
+import base64
 import hashlib
 from datetime import datetime, timedelta
 from typing import Any, Iterable
@@ -10,7 +11,7 @@ from . import vial_adapter as va
 from .device import Session, canonical_json
 from .errors import VialticError
 from .models import (
-    AltRepeatKeyValue, Baseline, Change, ComboValue, Configuration, KeyOverrideValue, SetAltRepeatKeyChange,
+    AltRepeatKeyValue, Baseline, Change, MacroChangeSummary, SetMacroChange, SetMacrosOperation, ComboValue, Configuration, KeyOverrideValue, SetAltRepeatKeyChange,
     SetAltRepeatKeyOperation, SetComboChange, SetComboOperation, SetKeyOverrideChange, SetKeyOverrideOperation, SetQmkSettingChange, SetQmkSettingOperation,
     TapDanceValue, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
     ProposalType, ProposalUnlock, SetEncoderChange, SetEncoderOperation, SetKeyChange, SetKeyOperation,
@@ -31,7 +32,7 @@ RECOVERY_TEXT = ("Everything Vialtic can read from the keyboard is saved before 
 
 FAMILY_OF_OPERATION = {"set_key": "keymap", "set_encoder": "encoders", "set_layout_options": "layout_options",
                        "set_tap_dance": "tap_dance", "set_combo": "combos", "set_key_override": "key_overrides",
-                       "set_alt_repeat_key": "alt_repeat_keys", "set_qmk_setting": "settings"}
+                       "set_alt_repeat_key": "alt_repeat_keys", "set_qmk_setting": "settings", "set_macros": "macros"}
 U8 = 0xFF
 U16 = 0xFFFF
 
@@ -57,7 +58,8 @@ def after_keycodes(op: Operation) -> list[KeycodeValue]:
 
 def requires_unlock(operations: Iterable[Operation]) -> bool:
     """Whether the firmware will only accept these writes while physically unlocked."""
-    return any(value.keycode == va.RESET_KEYCODE for op in operations for value in after_keycodes(op))
+    return any(op.type == "set_macros" or any(value.keycode == va.RESET_KEYCODE for value in after_keycodes(op))
+               for op in operations)
 
 
 def _capability(present: object, family: str, description: str) -> None:
@@ -80,6 +82,7 @@ class _Planner:
         self.seen: set[tuple] = set()
         self.layout_value: int | None = None
         self.settings_after: dict[int, int] = {}
+        self.macro_edits: dict[int, bytes] = {}
 
     def _once(self, target: tuple, description: str) -> None:
         if target in self.seen:
@@ -280,7 +283,34 @@ class _Planner:
                 value = change.value
         self.settings_after[qsid] = value
 
+    def _set_macro(self, change: SetMacroChange) -> None:
+        _capability(self.kb.macro_count and self.kb.macro_memory, "macros", "macros")
+        self._index(change.index, self.kb.macro_count, "Macro")
+        self._once(("macro", change.index), f"macro {change.index}")
+        data, notes = va.encode_macro(self.kb, change.index, change.actions)
+        self.warnings.extend(notes)
+        self.macro_edits[change.index] = data
+
+    def _finish_macros(self) -> None:
+        if not self.macro_edits:
+            return
+        macros = self.config.macros
+        before = base64.b64decode(macros.buffer_b64)
+        segments = va.macro_segments(before, macros.count)
+        for index, data in self.macro_edits.items():
+            segments[index] = data
+        after = b"\x00".join(segments) + b"\x00"
+        if after == before:
+            return self._skip("macros")
+        if len(after) > macros.memory_bytes:
+            raise VialticError("capacity_exceeded", f"The macros would need {len(after)} bytes and this keyboard has "
+                                                    f"{macros.memory_bytes}. Nothing was changed.",
+                               details={"needed_bytes": len(after), "memory_bytes": macros.memory_bytes},
+                               next_steps=["Shorten or clear a macro. Vialtic never truncates them."])
+        self.operations.append(macro_buffer_operation(before, after, macros.count, macros.memory_bytes, self.kb.vial_protocol))
+
     def finish(self) -> tuple[list[Operation], list[str]]:
+        self._finish_macros()
         for qsid, value in self.settings_after.items():
             before_value = self.config.settings.values[str(qsid)]
             if value == before_value:
@@ -309,6 +339,31 @@ def validate_changes(session: Session, snapshot: Snapshot, changes: Iterable[Cha
     return planner.finish()
 
 
+def macro_buffer_operation(before: bytes, after: bytes, count: int, memory: int, vial_protocol: int | None) -> SetMacrosOperation:
+    """Compare raw buffers macro by macro. The preview needs a keyboard's protocol to mean anything."""
+    old, new = va.macro_segments(before, count), va.macro_segments(after, count)
+    changed = []
+    for index, (was, now) in enumerate(zip(old, new)):
+        if was != now:
+            previews = {} if vial_protocol is None else dict(before=va.macro_preview(was, vial_protocol),
+                                                             after=va.macro_preview(now, vial_protocol))
+            changed.append(MacroChangeSummary(index=index, before_bytes=len(was), after_bytes=len(now), **previews))
+    return SetMacrosOperation(changed=changed, memory_bytes=memory, before_used_bytes=len(before), after_used_bytes=len(after),
+                              before_buffer_b64=base64.b64encode(before).decode("ascii"),
+                              after_buffer_b64=base64.b64encode(after).decode("ascii"))
+
+
+def redact_proposal(proposal: Proposal) -> Proposal:
+    """A copy safe for default output. Its id no longer verifies, so it is for display only."""
+    operations = []
+    for op in proposal.operations:
+        if op.type == "set_macros":
+            changed = [item.model_copy(update=dict(before=None, after=None)) for item in op.changed]
+            op = op.model_copy(update=dict(changed=changed, before_buffer_b64=None, after_buffer_b64=None, redacted=True))
+        operations.append(op)
+    return proposal.model_copy(update={"operations": operations})
+
+
 def describe_operation(op: Operation) -> str:
     """One line for people. Macro contents never appear here."""
     if op.type == "set_key":
@@ -324,6 +379,9 @@ def describe_operation(op: Operation) -> str:
         return f"combo {op.index}: {keys[0]} => {op.before.output.keycode} -> {keys[1]} => {op.after.output.keycode}"
     if op.type == "set_qmk_setting":
         return f"QMK setting {op.qsid} ({op.title}): {op.before} -> {op.after}"
+    if op.type == "set_macros":
+        which = ", ".join(str(item.index) for item in op.changed) or "none (only the raw buffer differs)"
+        return f"macros {which}: buffer {op.before_used_bytes} -> {op.after_used_bytes} of {op.memory_bytes} bytes"
     if op.type == "set_key_override":
         return f"key override {op.index}: {_changed_fields(op.before, op.after)}"
     if op.type == "set_alt_repeat_key":
@@ -354,6 +412,7 @@ def family_state(config: Configuration) -> dict[str, dict[str, Any]]:
         "key_overrides": {str(i): dict(e) for i, e in enumerate(config.key_overrides)},
         "alt_repeat_keys": {str(i): dict(e) for i, e in enumerate(config.alt_repeat_keys)},
         "settings": dict(config.settings.values),
+        "macros": {"buffer": config.macros.buffer_b64},
     }
 
 
@@ -375,6 +434,8 @@ def operation_effect(op: Operation) -> tuple[str, str, Any, Any]:
         return "alt_repeat_keys", str(op.index), va.alt_repeat_wire(op.before), va.alt_repeat_wire(op.after)
     if op.type == "set_qmk_setting":
         return "settings", str(op.qsid), op.before, op.after
+    if op.type == "set_macros":
+        return "macros", "buffer", op.before_buffer_b64, op.after_buffer_b64
     raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 
 
@@ -385,10 +446,18 @@ def affected_families(operations: Iterable[Operation]) -> list[str]:
 def restore_blockers(current: Configuration, target: Configuration) -> list[str]:
     """Families whose shape changed, which happens when firmware was rebuilt with the same definition."""
     have, want = family_state(current), family_state(target)
-    return [family for family in want if set(want[family]) - set(have[family])]
+    blockers = [family for family in want if set(want[family]) - set(have[family])]
+    # A snapshot with its macros left out, or a buffer that no longer fits, cannot be written back.
+    macros = target.macros
+    if "macros" not in blockers and macros.count and (
+            macros.buffer_b64 is None or macros.count != current.macros.count
+            or len(base64.b64decode(macros.buffer_b64)) - macros.count > current.macros.memory_bytes):
+        blockers.append("macros")
+    return blockers
 
 
-def restore_operations(current: Configuration, target: Configuration) -> tuple[list[Operation], list[str], list[str]]:
+def restore_operations(current: Configuration, target: Configuration,
+                       vial_protocol: int | None = None) -> tuple[list[Operation], list[str], list[str]]:
     """Operations turning current into target. Also returns unrestorable families and notes."""
     ops: list[Operation] = []
     now_keys = {(e.layer, e.row, e.col): e for e in current.keymap}
@@ -433,9 +502,12 @@ def restore_operations(current: Configuration, target: Configuration) -> tuple[l
                 title = va.setting_change_title(qsid, current.settings.values[key], wanted)
                 ops.append(SetQmkSettingOperation(qsid=qsid, title=title, before=current.settings.values[key], after=wanted))
 
+    if "macros" not in blockers and current.macros.buffer_b64 != target.macros.buffer_b64:
+        # Raw bytes, never the parsed form: parsing drops malformed bytes and re-encodes others.
+        ops.append(macro_buffer_operation(base64.b64decode(current.macros.buffer_b64), base64.b64decode(target.macros.buffer_b64),
+                                          target.macros.count, current.macros.memory_bytes, vial_protocol))
+
     now_data, target_data = current.model_dump(mode="json"), target.model_dump(mode="json")
-    blockers += [f for f in va.CHECKED_FAMILIES
-                 if f not in va.RESTORABLE_FAMILIES and f not in blockers and now_data[f] != target_data[f]]
     notes = []
     moved = [key for key, raw in target.settings.unknown_raw.items() if current.settings.unknown_raw.get(key) not in (None, raw)]
     if moved:
@@ -497,13 +569,19 @@ def unexplained_values(baseline: Configuration, operations: Iterable[Operation],
     A keyboard holding any is not provably the unit that was being written, or another
     application changed it during the write. Either way it must not be overwritten.
     """
+    operations = list(operations)
     allowed = {family: {target: [value] for target, value in values.items()}
                for family, values in family_state(baseline).items()}
     for op in operations:
         family, target, before, after = operation_effect(op)
         allowed.setdefault(family, {}).setdefault(target, []).extend([before, after])
-    return [VerificationDifference(family=family, target=target, observed=value)
-            for family, values in family_state(observed).items() for target, value in values.items()
+    state = family_state(observed)
+    # A macro write goes out in chunks, so an interrupted one can leave any mix of old and new.
+    # The other families still identify the keyboard.
+    if any(op.type == "set_macros" for op in operations):
+        state.pop("macros")
+    return [VerificationDifference(family=family, target=target, observed=None if family == "macros" else value)
+            for family, values in state.items() for target, value in values.items()
             if value not in allowed.get(family, {}).get(target, [])]
 
 
@@ -518,13 +596,10 @@ def compare_state(baseline: Configuration, operations: Iterable[Operation], obse
             continue
         for target, value in values.items():
             if seen.get(family, {}).get(target) != value:
-                diffs.append(VerificationDifference(family=family, target=target, expected=value,
+                # Values stay out of macro entries: their contents must not reach output by default.
+                diffs.append(VerificationDifference(family=family, target=target) if family == "macros" else
+                             VerificationDifference(family=family, target=target, expected=value,
                                                     observed=seen.get(family, {}).get(target)))
-    base, now = baseline.model_dump(mode="json"), observed.model_dump(mode="json")
-    for family in va.CHECKED_FAMILIES:
-        # Values stay out of these entries: macro contents must not reach output by default.
-        if family not in va.RESTORABLE_FAMILIES and family not in skip_families and base[family] != now[family]:
-            diffs.append(VerificationDifference(family=family, target=family))
     return diffs
 
 
@@ -536,6 +611,13 @@ def format_proposal(proposal: Proposal) -> str:
     if proposal.operations:
         lines.append(f"Changes ({len(proposal.operations)}):")
         lines.extend(f"  {describe_operation(op)}" for op in proposal.operations)
+        for op in proposal.operations:
+            if op.type == "set_macros" and not op.redacted:
+                for item in op.changed:
+                    lines += [f"  macro {item.index} before: {item.before}", f"  macro {item.index} after: {item.after}"]
+            elif op.type == "set_macros":
+                lines.append(f"  Macro contents are left out. Show them to the user before approval: "
+                             f"vialtic proposal show {proposal.id} --include-macros")
     else:
         lines.append("Changes: none; the keyboard already matches the target.")
     if proposal.unlock.required:

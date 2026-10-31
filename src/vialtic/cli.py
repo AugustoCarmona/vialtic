@@ -91,6 +91,8 @@ def build_parser() -> argparse.ArgumentParser:
     proposal = sub.add_parser("proposal", help="Read stored proposals.").add_subparsers(dest="action", required=True, parser_class=_Parser)
     show = leaf(proposal, "show", "Show a stored proposal.", device=False)
     show.add_argument("proposal_id")
+    show.add_argument("--include-macros", action="store_true",
+                      help="include macro contents, which can hold typed text; left out by default")
 
     apply_cmd = leaf(sub, "apply", "Apply one approved proposal, verify it and keep a backup.")
     apply_cmd.add_argument("proposal_id")
@@ -156,6 +158,12 @@ def _redact_macros(snapshot: Snapshot) -> Snapshot:
     config = snapshot.configuration
     macros = config.macros.model_copy(update=dict(buffer_b64=None, macros=None, redacted=True))
     return snapshot.model_copy(update={"configuration": config.model_copy(update={"macros": macros})})
+
+
+def _redacted(proposal: Proposal) -> Proposal:
+    from .proposals import redact_proposal
+
+    return redact_proposal(proposal)
 
 
 def _progress(message: str) -> None:
@@ -393,18 +401,19 @@ def run(args: argparse.Namespace) -> int:
     elif command == "keycodes":
         emit(args, service.keycodes(selector, args.query))
     elif command == "plan":
-        emit(args, service.create_proposal(selector, _changes_from_args(args)))
+        emit(args, _redacted(service.create_proposal(selector, _changes_from_args(args))))
     elif command == "proposal":
-        emit(args, service.get_proposal(args.proposal_id))
+        proposal = service.get_proposal(args.proposal_id)
+        emit(args, proposal if args.include_macros else _redacted(proposal))
     elif command == "apply":
         signal.signal(signal.SIGTERM, _raise_interrupt)
         result = service.apply_proposal(args.proposal_id, _approval(service, args.proposal_id, args.user_approved), selector)
         emit(args, result, ok=result.outcome == "verified")
         return EXIT_OK if result.outcome == "verified" else EXIT_APPLY_FAILED
     elif command == "undo":
-        emit(args, service.create_undo_proposal(selector))
+        emit(args, _redacted(service.create_undo_proposal(selector)))
     elif command == "recover":
-        emit(args, service.create_recovery_proposal(selector))
+        emit(args, _redacted(service.create_recovery_proposal(selector)))
     elif command == "unlock":
         if action == "status":
             emit(args, service.unlock_status(selector))

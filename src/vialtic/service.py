@@ -269,7 +269,8 @@ class VialticService:
                                                  f"{target.device.vial_protocol} and this keyboard now reports "
                                                  f"{current.device.vial_protocol}, which encodes keycodes differently.",
                                next_steps=["Create a new proposal for the changes you want."])
-        operations, blockers, notes = proposals.restore_operations(current.configuration, target.configuration)
+        operations, blockers, notes = proposals.restore_operations(current.configuration, target.configuration,
+                                                                   current.device.vial_protocol)
         if blockers and purpose == "recovery":
             # Refusing here would leave the keyboard unable to accept any new plan.
             notes.append(f"The firmware no longer has the same entries for {', '.join(blockers)} as the saved state, so "

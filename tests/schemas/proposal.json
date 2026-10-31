@@ -260,6 +260,63 @@
       "title": "KeycodeValue",
       "type": "object"
     },
+    "MacroChangeSummary": {
+      "additionalProperties": false,
+      "description": "One macro the buffer write changes. `before` and `after` are a parsed preview for people;\nthey can hide malformed bytes, and the buffers below are what is written.",
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {},
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After"
+        },
+        "after_bytes": {
+          "title": "After Bytes",
+          "type": "integer"
+        },
+        "before": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {},
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before"
+        },
+        "before_bytes": {
+          "title": "Before Bytes",
+          "type": "integer"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "before_bytes",
+        "after_bytes"
+      ],
+      "title": "MacroChangeSummary",
+      "type": "object"
+    },
     "ProposalUnlock": {
       "additionalProperties": false,
       "properties": {
@@ -480,6 +537,74 @@
       "title": "SetLayoutOptionsOperation",
       "type": "object"
     },
+    "SetMacrosOperation": {
+      "additionalProperties": false,
+      "description": "Macros are one firmware buffer, written whole. Contents are removed from default output.",
+      "properties": {
+        "after_buffer_b64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Buffer B64"
+        },
+        "after_used_bytes": {
+          "title": "After Used Bytes",
+          "type": "integer"
+        },
+        "before_buffer_b64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before Buffer B64"
+        },
+        "before_used_bytes": {
+          "title": "Before Used Bytes",
+          "type": "integer"
+        },
+        "changed": {
+          "items": {
+            "$ref": "#/$defs/MacroChangeSummary"
+          },
+          "title": "Changed",
+          "type": "array"
+        },
+        "memory_bytes": {
+          "title": "Memory Bytes",
+          "type": "integer"
+        },
+        "redacted": {
+          "default": false,
+          "title": "Redacted",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "set_macros",
+          "default": "set_macros",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "changed",
+        "memory_bytes",
+        "before_used_bytes",
+        "after_used_bytes"
+      ],
+      "title": "SetMacrosOperation",
+      "type": "object"
+    },
     "SetQmkSettingOperation": {
       "additionalProperties": false,
       "properties": {
@@ -638,6 +763,7 @@
             "set_key": "#/$defs/SetKeyOperation",
             "set_key_override": "#/$defs/SetKeyOverrideOperation",
             "set_layout_options": "#/$defs/SetLayoutOptionsOperation",
+            "set_macros": "#/$defs/SetMacrosOperation",
             "set_qmk_setting": "#/$defs/SetQmkSettingOperation",
             "set_tap_dance": "#/$defs/SetTapDanceOperation"
           },
@@ -667,6 +793,9 @@
           },
           {
             "$ref": "#/$defs/SetQmkSettingOperation"
+          },
+          {
+            "$ref": "#/$defs/SetMacrosOperation"
           }
         ]
       },
