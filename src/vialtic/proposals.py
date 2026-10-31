@@ -113,6 +113,7 @@ class _Planner:
         self.layout_value: int | None = None
         self.settings_after: dict[int, int] = {}
         self.macro_edits: dict[int, bytes] = {}
+        self.macro_buffer: bytes | None = None
         self.lighting_saves: set[bool] = set()
 
     def _once(self, target: tuple, description: str) -> None:
@@ -367,14 +368,21 @@ class _Planner:
         self.macro_edits[change.index] = data
 
     def _finish_macros(self) -> None:
-        if not self.macro_edits:
+        if not self.macro_edits and self.macro_buffer is None:
             return
         macros = self.config.macros
         before = va.decode_macro_buffer(macros.buffer_b64)
-        segments = va.macro_segments(before, macros.count)
-        for index, data in self.macro_edits.items():
-            segments[index] = data
-        after = b"\x00".join(segments) + b"\x00"
+        if self.macro_buffer is not None:
+            _capability(macros.count and macros.memory_bytes, "macros", "macros")
+            # A whole buffer from a file: exactly one terminator per macro, or later macros would shift.
+            after = self.macro_buffer
+            if not after.endswith(b"\x00") or after.count(b"\x00") != macros.count:
+                raise VialticError("invalid_file", f"The macro buffer in this profile does not hold exactly {macros.count} macros.")
+        else:
+            segments = va.macro_segments(before, macros.count)
+            for index, data in self.macro_edits.items():
+                segments[index] = data
+            after = b"\x00".join(segments) + b"\x00"
         if after == before:
             return self._skip("macros")
         if len(after) > macros.memory_bytes:
@@ -406,12 +414,13 @@ class _Planner:
         return self.operations, self.warnings
 
 
-def validate_changes(session: Session, snapshot: Snapshot, changes: Iterable[Change],
-                     quiet: bool = False) -> tuple[list[Operation], list[str]]:
+def validate_changes(session: Session, snapshot: Snapshot, changes: Iterable[Change], quiet: bool = False,
+                     macro_buffer: bytes | None = None) -> tuple[list[Operation], list[str]]:
     """Turn requested changes into typed operations, or refuse the whole request."""
     planner = _Planner(session, snapshot, quiet)
     for change in changes:
         planner.add(change)
+    planner.macro_buffer = macro_buffer
     return planner.finish()
 
 

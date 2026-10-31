@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import json
+import pathlib
 import platform
 import struct
 import sys
@@ -11,17 +13,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from . import __version__, proposals, render
+from pydantic import ValidationError
+
+from . import __version__, profiles, proposals, render
 from . import vial_adapter as va
 from .device import Backend, DeviceManager, Session
 from .errors import VialticError
 from .models import (
     ApplyResult, ApprovalAttestation, ChangeSet, DeviceEntry, DeviceIdentity, DeviceList, DoctorCheck, DoctorReport,
-    FollowingWrite,
+    ExportResult, FollowingWrite, Profile, ProfileDeleted, ProfileList, ProfileSaved, ProfileSummary,
     InspectResult, Journal, KeycodeList, Operation, OperationResult, Proposal, ProposalType, Snapshot, UnlockPosition,
     UnlockStatus, VerificationDifference, VersionInfo, ViewResult,
 )
-from .storage import Store
+from .storage import Store, atomic_write
 
 
 @dataclass
@@ -226,6 +230,119 @@ class VialticService:
                 raise VialticError("no_changes", "The keyboard already holds every requested value.",
                                    details={"notes": warnings})
             return self._finish_proposal("change", session, entries, snapshot, operations, warnings)
+
+    # Profiles. Local until a proposal is made, and the proposal is an ordinary one.
+
+    def _load_profile(self, name: str) -> Profile:
+        profiles.check_name(name)
+        path = self.store.profile_path(name)
+        if not path.exists() and not path.is_symlink():
+            raise VialticError("profile_not_found", f"No profile named {name}.", next_steps=["Run `vialtic profile list`."])
+        try:
+            profile = Profile.model_validate_json(profiles.read_untrusted(path))
+        except ValidationError as exc:
+            raise VialticError("invalid_file", f"The profile at {path} does not match the format of this Vialtic version.",
+                               details={"errors": exc.error_count()},
+                               next_steps=[f"Vialtic will not delete it. Use the version that wrote it, or `vialtic profile delete {name}`."]) from exc
+        profiles.validate_shape(profile)
+        return profile
+
+    def _store_profile(self, profile: Profile, overwrite: bool) -> str:
+        profiles.check_name(profile.name)
+        path = self.store.profile_path(profile.name)
+        if not overwrite and (path.exists() or path.is_symlink()):
+            raise VialticError("profile_exists", f"A profile named {profile.name} already exists. Nothing was changed.",
+                               next_steps=["Choose another name, or pass --overwrite to replace it."])
+        return str(self.store.write_profile(profile.name, profile.model_dump_json(indent=2).encode("utf-8")))
+
+    def save_profile(self, selector: str | None, name: str, overwrite: bool = False) -> ProfileSaved:
+        profiles.check_name(name)
+        entry, desc, _ = self.devices.select(selector)
+        with self.devices.session(desc) as session:
+            snapshot = session.snapshot(self.options.now())
+            profile = profiles.from_snapshot(name, snapshot, self.options.now(), kb=session.kb)
+        path = self._store_profile(profile, overwrite)
+        return ProfileSaved(name=name, path=path, origin=profile.origin, compatibility="compatible", omissions=profile.omissions,
+                            notes=snapshot.warnings)
+
+    def list_profiles(self) -> ProfileList:
+        summaries = []
+        for name in self.store.profile_names():
+            try:
+                profile = self._load_profile(name)
+                summaries.append(ProfileSummary(name=name, valid=True, created_at=profile.created_at, origin=profile.origin,
+                                                device_name=profile.source.device_name, vial_uid=profile.source.vial_uid))
+            except VialticError as exc:
+                summaries.append(ProfileSummary(name=name, valid=False, problem=exc.code))
+        return ProfileList(profiles=summaries)
+
+    def get_profile(self, name: str) -> Profile:
+        return self._load_profile(name)
+
+    def delete_profile(self, name: str) -> ProfileDeleted:
+        profiles.check_name(name)
+        path = self.store.profile_path(name)
+        if not path.exists() and not path.is_symlink():
+            raise VialticError("profile_not_found", f"No profile named {name}.")
+        self.store.delete_profile(name)
+        return ProfileDeleted(name=name)
+
+    def plan_profile(self, selector: str | None, name: str, lighting: str = "save") -> Proposal:
+        profile = self._load_profile(name)
+        entry, desc, entries = self.devices.select(selector)
+        with self.devices.session(desc) as session:
+            self._refuse_if_unresolved(session.identity)
+            snapshot = session.snapshot(self.options.now())
+            changes, buffer, notes = profiles.plan_changes(profile, snapshot, session.kb, lighting)
+            operations, warnings = proposals.validate_changes(session, snapshot, changes, quiet=True, macro_buffer=buffer)
+            if not operations:
+                raise VialticError("no_changes", f"The keyboard already matches profile {name}.", details={"notes": notes + warnings})
+            notes.insert(0, f"Applies profile {name}.")
+            return self._finish_proposal("profile", session, entries, snapshot, operations, notes + warnings)
+
+    def import_profile(self, selector: str | None, path: str, name: str, overwrite: bool = False, offline: bool = False) -> ProfileSaved:
+        """Validates and stores. Reads a keyboard to check compatibility, and never writes to one."""
+        profiles.check_name(name)
+        profile, notes = profiles.parse_file(pathlib.Path(path), name, self.options.now())
+        compatibility = "unchecked"
+        if offline:
+            notes.append("Not checked against a keyboard. `vialtic profile plan` will check it.")
+        else:
+            entry, desc, _ = self.devices.select(selector)
+            with self.devices.session(desc) as session:
+                snapshot = session.snapshot(self.options.now())
+                changes, buffer, check_notes = profiles.plan_changes(profile, snapshot, session.kb, "skip")
+                proposals.validate_changes(session, snapshot, changes, quiet=True, macro_buffer=buffer)
+                notes += check_notes
+            compatibility = "compatible"
+        stored = self._store_profile(profile, overwrite)
+        return ProfileSaved(name=name, path=stored, origin=profile.origin, compatibility=compatibility, omissions=profile.omissions,
+                            unknown_fields=sorted(profile.unknown_fields), notes=notes)
+
+    def export_configuration(self, selector: str | None, output: str, fmt: str, profile_name: str | None = None,
+                             include_macros: bool = False, overwrite: bool = False) -> ExportResult:
+        if profile_name is not None:
+            profile = self._load_profile(profile_name)
+        else:
+            entry, desc, _ = self.devices.select(selector)
+            with self.devices.session(desc) as session:
+                profile = profiles.from_snapshot("export", session.snapshot(self.options.now()), self.options.now(), kb=session.kb)
+        if not include_macros:
+            profile = profiles.without_macros(profile)
+        if fmt == "vil":
+            data, omissions = profiles.to_vil(profile)
+            body = json.dumps(data, indent=1).encode("utf-8")
+        else:
+            omissions = list(profile.omissions)
+            body = profile.model_dump_json(indent=2).encode("utf-8")
+        target = pathlib.Path(output)
+        if target.is_symlink():
+            raise VialticError("output_exists", f"{target} is a symbolic link. Vialtic will not write through it.")
+        if target.exists() and not overwrite:
+            raise VialticError("output_exists", f"{target} already exists. Nothing was changed.", next_steps=["Pass --overwrite to replace it."])
+        atomic_write(target, body, own_directory=False)
+        return ExportResult(format=fmt, path=str(target), macros_included=profile.configuration.has_macros(), omissions=omissions,
+                            unknown_fields=sorted(profile.unknown_fields))
 
     def create_undo_proposal(self, selector: str | None) -> Proposal:
         entry, desc, entries = self.devices.select(selector)

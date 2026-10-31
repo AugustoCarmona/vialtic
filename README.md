@@ -19,7 +19,7 @@ this idea was born on friday, october 30, after an extreme day of work. to clear
 | Discovery, full read-only snapshot, text and PNG views | Implemented. Read-only use verified on a real Corne on Linux x86_64. |
 | Proposal, approval, write, read-back, undo, recovery for keymap keys | Implemented and tested on the emulator. One key change, read-back and undo verified on a real Corne on Linux x86_64. Failure recovery is emulator-tested only. |
 | Encoders, layout options, tap dance, combos, key overrides, alternate repeat keys, QMK settings, macros, lighting | Implemented and tested on the emulator only, including a fault sweep. **Not yet verified on any real keyboard.** [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) has the details and [`docs/HARDWARE_TEST.md`](docs/HARDWARE_TEST.md) is the test plan. |
-| Named profiles, `.vil` interchange | Planned (M4). |
+| Named profiles, `.vil` and Vialtic file import and export | Implemented and tested on the emulator only. Applying one creates an ordinary proposal. **Not yet verified on any real keyboard.** |
 | MCP server for agents | Planned (M5). Agents with terminal access can use the CLI. |
 | Installer, updates, Homebrew | Planned (M6). |
 | macOS Apple Silicon | Tests and a packaged build pass in CI on macOS 15 arm64, using the emulator. Not yet tried with a real keyboard. |

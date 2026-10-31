@@ -112,8 +112,29 @@ def read_model(path: pathlib.Path, cls: type[M]) -> M:
 
 
 class Store:
-    def __init__(self, root: pathlib.Path):
+    def __init__(self, root: pathlib.Path, profiles: pathlib.Path | None = None):
         self.root = root
+        self.profiles = profiles or root / "profiles"
+
+    # Profiles. Only names checked by profiles.check_name reach these.
+
+    def profile_path(self, name: str) -> pathlib.Path:
+        return self.profiles / f"{name}.json"
+
+    def profile_names(self) -> list[str]:
+        if not self.profiles.is_dir() or self.profiles.is_symlink():
+            return []
+        return sorted(path.stem for path in self.profiles.glob("*.json") if not path.is_symlink())
+
+    def write_profile(self, name: str, data: bytes) -> pathlib.Path:
+        if self.profiles.is_symlink():
+            raise VialticError("storage_failed", f"{self.profiles} is a symbolic link. Vialtic will not write profiles through it.")
+        path = self.profile_path(name)
+        atomic_write(path, data)
+        return path
+
+    def delete_profile(self, name: str) -> None:
+        self.profile_path(name).unlink()
 
     # Locks.
 

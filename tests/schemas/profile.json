@@ -1,0 +1,512 @@
+{
+  "$defs": {
+    "LightingState": {
+      "additionalProperties": false,
+      "description": "Values the firmware reports now. Firmware does not say whether they are saved.",
+      "properties": {
+        "backlight": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backlight"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "rgblight": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rgblight"
+        },
+        "vialrgb": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vialrgb"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "LightingState",
+      "type": "object"
+    },
+    "ProfileConfiguration": {
+      "additionalProperties": false,
+      "description": "Absent means the profile says nothing about that family, and a plan leaves it alone.\n\n`macro_buffer_b64` is the raw buffer and is what gets restored. `macros` is the parsed form,\nwhich a .vil file holds and which is lossy for anything `lossy_macros` lists.",
+      "properties": {
+        "alt_repeat_keys": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alt Repeat Keys"
+        },
+        "combos": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {},
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Combos"
+        },
+        "encoders": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ProfileEncoder"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Encoders"
+        },
+        "key_overrides": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Key Overrides"
+        },
+        "keymap": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ProfileKey"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keymap"
+        },
+        "layout_options": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Layout Options"
+        },
+        "lighting": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LightingState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "lossy_macros": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Lossy Macros",
+          "type": "array"
+        },
+        "macro_buffer_b64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Macro Buffer B64"
+        },
+        "macro_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Macro Count"
+        },
+        "macros": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "items": {},
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Macros"
+        },
+        "macros_redacted": {
+          "default": false,
+          "title": "Macros Redacted",
+          "type": "boolean"
+        },
+        "matrix": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matrix"
+        },
+        "settings": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Settings"
+        },
+        "tap_dance": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {},
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tap Dance"
+        }
+      },
+      "title": "ProfileConfiguration",
+      "type": "object"
+    },
+    "ProfileEncoder": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Direction",
+          "type": "integer"
+        },
+        "index": {
+          "maximum": 255,
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "keycode": {
+          "maxLength": 64,
+          "title": "Keycode",
+          "type": "string"
+        },
+        "layer": {
+          "maximum": 31,
+          "minimum": 0,
+          "title": "Layer",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "layer",
+        "index",
+        "direction",
+        "keycode"
+      ],
+      "title": "ProfileEncoder",
+      "type": "object"
+    },
+    "ProfileKey": {
+      "additionalProperties": false,
+      "properties": {
+        "col": {
+          "maximum": 255,
+          "minimum": 0,
+          "title": "Col",
+          "type": "integer"
+        },
+        "keycode": {
+          "maxLength": 64,
+          "title": "Keycode",
+          "type": "string"
+        },
+        "layer": {
+          "maximum": 31,
+          "minimum": 0,
+          "title": "Layer",
+          "type": "integer"
+        },
+        "row": {
+          "maximum": 255,
+          "minimum": 0,
+          "title": "Row",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "layer",
+        "row",
+        "col",
+        "keycode"
+      ],
+      "title": "ProfileKey",
+      "type": "object"
+    },
+    "ProfileSource": {
+      "additionalProperties": false,
+      "description": "Where a profile came from. A .vil file only says the firmware id and protocols.",
+      "properties": {
+        "binding_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Binding Id"
+        },
+        "device_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Name"
+        },
+        "layout_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Layout Fingerprint"
+        },
+        "numeric_keycodes": {
+          "default": false,
+          "title": "Numeric Keycodes",
+          "type": "boolean"
+        },
+        "product_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Product Id"
+        },
+        "vendor_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vendor Id"
+        },
+        "via_protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Via Protocol"
+        },
+        "vial_protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vial Protocol"
+        },
+        "vial_uid": {
+          "title": "Vial Uid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vial_uid"
+      ],
+      "title": "ProfileSource",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A named configuration. Local until a proposal is made from it.",
+  "properties": {
+    "configuration": {
+      "$ref": "#/$defs/ProfileConfiguration"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "kind": {
+      "const": "profile",
+      "default": "profile",
+      "title": "Kind",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "omissions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Omissions",
+      "type": "array"
+    },
+    "origin": {
+      "enum": [
+        "keyboard",
+        "vil",
+        "vialtic"
+      ],
+      "title": "Origin",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "source": {
+      "$ref": "#/$defs/ProfileSource"
+    },
+    "unknown_fields": {
+      "additionalProperties": true,
+      "title": "Unknown Fields",
+      "type": "object"
+    },
+    "vialtic_version": {
+      "title": "Vialtic Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "created_at",
+    "origin",
+    "vialtic_version",
+    "source",
+    "configuration"
+  ],
+  "title": "Profile",
+  "type": "object"
+}

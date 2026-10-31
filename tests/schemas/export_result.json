@@ -1,0 +1,54 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "enum": [
+        "vil",
+        "vialtic"
+      ],
+      "title": "Format",
+      "type": "string"
+    },
+    "kind": {
+      "const": "export_result",
+      "default": "export_result",
+      "title": "Kind",
+      "type": "string"
+    },
+    "macros_included": {
+      "title": "Macros Included",
+      "type": "boolean"
+    },
+    "omissions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Omissions",
+      "type": "array"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "unknown_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unknown Fields",
+      "type": "array"
+    }
+  },
+  "required": [
+    "format",
+    "path",
+    "macros_included"
+  ],
+  "title": "ExportResult",
+  "type": "object"
+}

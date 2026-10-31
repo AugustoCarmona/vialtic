@@ -1,0 +1,67 @@
+{
+  "additionalProperties": false,
+  "description": "No contents here: this goes to default output.",
+  "properties": {
+    "compatibility": {
+      "enum": [
+        "compatible",
+        "unchecked"
+      ],
+      "title": "Compatibility",
+      "type": "string"
+    },
+    "kind": {
+      "const": "profile_saved",
+      "default": "profile_saved",
+      "title": "Kind",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "omissions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Omissions",
+      "type": "array"
+    },
+    "origin": {
+      "title": "Origin",
+      "type": "string"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "unknown_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unknown Fields",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "origin",
+    "compatibility"
+  ],
+  "title": "ProfileSaved",
+  "type": "object"
+}
