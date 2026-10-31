@@ -61,7 +61,7 @@ from util import MSG_LEN, VIAL_SERIAL_NUMBER_MAGIC, VIBL_SERIAL_NUMBER_MAGIC, hi
 __all__ = [
     "CONTEXT_LOCK", "HeadlessKeyboard", "MSG_LEN", "ProtocolError", "RESET_KEYCODE", "SUPPORTED_VIAL_PROTOCOL",
     "SUPPORTED_VIA_PROTOCOL", "UnlockRequired", "VIAL_SERIAL_NUMBER_MAGIC", "VIBL_SERIAL_NUMBER_MAGIC", "hid_send",
-    "proto", "Keycode",
+    "proto", "Keycode", "QmkSettings",
 ]
 
 CONTEXT_LOCK = threading.RLock()

@@ -33,9 +33,10 @@ READ_COMMANDS = {
     proto.CMD_VIA_MACRO_GET_COUNT, proto.CMD_VIA_MACRO_GET_BUFFER_SIZE, proto.CMD_VIA_MACRO_GET_BUFFER,
     proto.CMD_VIA_GET_LAYER_COUNT, proto.CMD_VIA_KEYMAP_GET_BUFFER,
 }
-WRITE_COMMANDS = {
-    proto.CMD_VIA_SET_KEYBOARD_VALUE, proto.CMD_VIA_SET_KEYCODE, proto.CMD_VIA_LIGHTING_SET_VALUE,
-    proto.CMD_VIA_LIGHTING_SAVE, proto.CMD_VIA_MACRO_SET_BUFFER,
+WRITE_COMMANDS = {proto.CMD_VIA_SET_KEYCODE, proto.CMD_VIA_LIGHTING_SAVE, proto.CMD_VIA_MACRO_SET_BUFFER}
+LIGHTING_WRITES = {
+    proto.QMK_BACKLIGHT_BRIGHTNESS, proto.QMK_BACKLIGHT_EFFECT, proto.QMK_RGBLIGHT_BRIGHTNESS, proto.QMK_RGBLIGHT_EFFECT,
+    proto.QMK_RGBLIGHT_EFFECT_SPEED, proto.QMK_RGBLIGHT_COLOR, proto.VIALRGB_SET_MODE,
 }
 VIAL_READ = {
     proto.CMD_VIAL_GET_KEYBOARD_ID, proto.CMD_VIAL_GET_SIZE, proto.CMD_VIAL_GET_DEFINITION, proto.CMD_VIAL_GET_ENCODER,
@@ -60,6 +61,11 @@ def classify_packet(msg: bytes) -> str:
     if cmd == proto.CMD_VIA_GET_KEYBOARD_VALUE:
         # Live switch state is out of scope (no keypress monitoring).
         return "read" if sub == proto.VIA_LAYOUT_OPTIONS else "deny"
+    if cmd == proto.CMD_VIA_SET_KEYBOARD_VALUE:
+        # The same command also carries firmware-defined values; only layout options are configuration.
+        return "write" if sub == proto.VIA_LAYOUT_OPTIONS else "deny"
+    if cmd == proto.CMD_VIA_LIGHTING_SET_VALUE:
+        return "write" if sub in LIGHTING_WRITES else "deny"
     if cmd in READ_COMMANDS:
         return "read"
     if cmd in WRITE_COMMANDS:
@@ -80,6 +86,10 @@ def classify_packet(msg: bytes) -> str:
     return "deny"
 
 
+# Every write sets an absolute value, so repeating one is harmless; upstream sends some with no retries.
+WRITE_RETRIES = 20
+
+
 class GuardedTransport:
     """usb_send replacement for upstream Keyboard. Writes need an explicitly opened gate."""
 
@@ -96,6 +106,8 @@ class GuardedTransport:
                 (kind == "security" and not self._security_open):
             raise VialticError("write_blocked", f"Refused to send {kind} packet 0x{msg[:3].hex()}: gate closed.",
                                details={"packet_prefix": msg[:3].hex(), "class": kind})
+        if kind == "write":
+            retries = max(retries, WRITE_RETRIES)
         if self._max_retries is not None:
             retries = min(retries, self._max_retries)
         self.packets[kind] += 1
