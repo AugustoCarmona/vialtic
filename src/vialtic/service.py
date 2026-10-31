@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import platform
+import struct
 import sys
 import time
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from .device import Backend, DeviceManager, Session
 from .errors import VialticError
 from .models import (
     ApplyResult, ApprovalAttestation, ChangeSet, DeviceEntry, DeviceIdentity, DeviceList, DoctorCheck, DoctorReport,
+    FollowingWrite,
     InspectResult, Journal, KeycodeList, Operation, OperationResult, Proposal, ProposalType, Snapshot, UnlockPosition,
     UnlockStatus, VerificationDifference, VersionInfo, ViewResult,
 )
@@ -269,8 +271,11 @@ class VialticService:
                                                  f"{target.device.vial_protocol} and this keyboard now reports "
                                                  f"{current.device.vial_protocol}, which encodes keycodes differently.",
                                next_steps=["Create a new proposal for the changes you want."])
+        # Only what the reversed write changed: lighting can differ just because someone pressed a key.
+        following = target.followed_by
+        lighting_save = following.lighting_saved if following and "lighting" in following.families else None
         operations, blockers, notes = proposals.restore_operations(current.configuration, target.configuration,
-                                                                   current.device.vial_protocol)
+                                                                   current.device.vial_protocol, lighting_save)
         if blockers and purpose == "recovery":
             # Refusing here would leave the keyboard unable to accept any new plan.
             notes.append(f"The firmware no longer has the same entries for {', '.join(blockers)} as the saved state, so "
@@ -500,8 +505,9 @@ class VialticService:
             baseline = self.store.read_snapshot(pending)
             skip = proposals.restore_operations(current.configuration, baseline.configuration)[1]
         else:
-            baseline = current
-            self.store.write_pending(binding, current)
+            baseline = current.model_copy(update={"followed_by": FollowingWrite(
+                families=proposal.affected, lighting_saved=proposals.saves_lighting(proposal.operations))})
+            self.store.write_pending(binding, baseline)
         now = self.options.now()
         self.store.write_journal(Journal(
             proposal_id=proposal.id, proposal_type=proposal.proposal_type, binding_id=binding, device=session.identity,
@@ -575,19 +581,26 @@ class VialticService:
             state.failed_index = None
             session.refresh()
             observed = session.snapshot(self.options.now())
-        except (RuntimeError, OSError, VialticError, va.UnlockRequired) as exc:
+            differences = self._differences(state, proposal.operations, observed)
+            if differences:
+                raise _WriteFailure(f"Read-back does not match the expected result in {len(differences)} place(s).", differences)
+            # Last, so wrong values are never made persistent. The firmware does not confirm saves.
+            if proposals.saves_lighting(proposal.operations):
+                with session.transport.writes():
+                    session.kb.save_rgb()
+                state.warnings.append("Lighting values were verified and the save command was acknowledged. The firmware "
+                                      "cannot report whether they reached permanent storage.")
+        except (RuntimeError, OSError, VialticError, va.UnlockRequired, struct.error, ValueError, TypeError,
+                AttributeError, IndexError, KeyError, OverflowError, AssertionError) as exc:
             message = exc.message if isinstance(exc, VialticError) else str(exc)
             raise _WriteFailure(f"The keyboard stopped responding during the write: {message}") from exc
         finally:
             state.packets_total = session.transport.packets["write"] - state.packets_before
-        differences = self._differences(state, proposal.operations, observed)
-        if differences:
-            raise _WriteFailure(f"Read-back does not match the expected result in {len(differences)} place(s).", differences)
 
     @staticmethod
     def _differences(state: _ApplyState, operations: list[Operation], observed: Snapshot) -> list[VerificationDifference]:
         differences = proposals.compare_state(state.baseline.configuration, operations, observed.configuration,
-                                              state.skip_families)
+                                              state.skip_families, proposals.touches_lighting(state.proposal.operations))
         # Families a recovery leaves alone must at least not have moved since it was planned.
         expected = state.proposal.baseline.family_fingerprints
         differences += [VerificationDifference(family=family, target=family) for family in state.skip_families
@@ -735,6 +748,8 @@ class VialticService:
         """Restore the baseline within the reconnect window. Stops early on anything needing a person."""
         live = state.live
         target = state.baseline.configuration
+        lighting_save = (proposals.saves_lighting(state.proposal.operations)
+                         if proposals.touches_lighting(state.proposal.operations) else None)
         deadline = time.monotonic() + state.proposal.reconnect_window_seconds
         last_observed: Snapshot | None = None
         reason = "the keyboard did not come back in time."
@@ -762,7 +777,8 @@ class VialticService:
                         if proposals.unexplained_values(target, state.proposal.operations, last_observed.configuration):
                             return False, ("it holds values that neither the saved state nor this write explain, so it "
                                            "may be a different unit or another application changed it."), last_observed
-                        operations, blockers, _ = proposals.restore_operations(last_observed.configuration, target)
+                        operations, blockers, _ = proposals.restore_operations(
+                            last_observed.configuration, target, lighting_save=lighting_save)
                         blockers = [b for b in blockers if b not in state.skip_families]
                         if blockers:
                             return False, f"{', '.join(blockers)} changed and cannot be restored by this build.", last_observed
@@ -776,6 +792,9 @@ class VialticService:
                         last_observed = session.snapshot(self.options.now())
                         remaining = self._differences(state, [], last_observed)
                         if not remaining:
+                            if proposals.saves_lighting(operations):
+                                with session.transport.writes():
+                                    session.kb.save_rgb()
                             self._relock(session, state)
                             return True, "", last_observed
                         reason = f"{len(remaining)} value(s) still differ after restoring."

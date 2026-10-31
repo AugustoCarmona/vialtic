@@ -84,7 +84,9 @@ CHECKED_FAMILIES = [
 ]
 ALL_FAMILIES = CHECKED_FAMILIES + ["lighting"]
 RESTORABLE_FAMILIES = {"keymap", "encoders", "layout_options", "tap_dance", "combos", "key_overrides", "alt_repeat_keys",
-                       "settings", "macros"}
+                       "settings", "macros", "lighting"}
+LIGHTING_FIELDS = {"rgblight": ("brightness", "effect", "effect_speed", "hue", "saturation"),
+                   "backlight": ("brightness", "effect"), "vialrgb": ("mode", "speed", "hue", "saturation", "value")}
 
 
 class HeadlessKeyboard(Keyboard):
@@ -408,7 +410,8 @@ def writable_operations(kb: Keyboard) -> list[str]:
     available = {"set_key": True, "set_encoder": bool(kb.encoder_count), "set_layout_option": bool(kb.layout_labels),
                  "set_tap_dance": bool(kb.tap_dance_count), "set_combo": bool(kb.combo_count),
                  "set_key_override": bool(kb.key_override_count), "set_alt_repeat_key": bool(kb.alt_repeat_key_count),
-                 "set_qmk_setting": bool(set(kb.settings)), "set_macro": bool(kb.macro_count and kb.macro_memory)}
+                 "set_qmk_setting": bool(set(kb.settings)), "set_macro": bool(kb.macro_count and kb.macro_memory),
+                 "set_lighting": lighting_kind(kb) != "none"}
     return [name for name, present in available.items() if present]
 
 
@@ -667,6 +670,27 @@ def _alt_repeat_entry(value: AltRepeatKeyValue) -> AltRepeatKeyEntry:
     return entry
 
 
+def _write_lighting(kb: Keyboard, op) -> None:
+    """Sets current values only. Saving is a separate step that follows verification."""
+    after, changed = op.after, {name for name in op.after if op.after[name] != op.before.get(name)}
+    if op.system == "rgblight":
+        if changed & {"brightness", "hue", "saturation"}:
+            kb.set_qmk_rgblight_color(after["hue"], after["saturation"], after["brightness"])
+        if "effect" in changed:
+            kb.set_qmk_rgblight_effect(after["effect"])
+        if "effect_speed" in changed:
+            kb.set_qmk_rgblight_effect_speed(after["effect_speed"])
+    elif op.system == "backlight":
+        if "brightness" in changed:
+            kb.set_qmk_backlight_brightness(after["brightness"])
+        if "effect" in changed:
+            kb.set_qmk_backlight_effect(after["effect"])
+    else:
+        # One packet carries all VialRGB values, so set the two fields upstream's setter does not.
+        kb.rgb_mode, kb.rgb_speed = after["mode"], after["speed"]
+        kb.set_vialrgb_color(after["hue"], after["saturation"], after["value"])
+
+
 def write_operation(kb: Keyboard, op) -> None:
     if op.type == "set_key":
         kb.set_key(op.layer, op.row, op.col, op.after.keycode)
@@ -690,6 +714,8 @@ def write_operation(kb: Keyboard, op) -> None:
         if kb.get_unlock_status() != 1:
             raise UnlockRequired("the keyboard must be physically unlocked for this write")
         kb.set_macro(writable_macro_bytes(base64.b64decode(op.after_buffer_b64), kb.macro_memory))
+    elif op.type == "set_lighting":
+        _write_lighting(kb, op)
     else:
         raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 

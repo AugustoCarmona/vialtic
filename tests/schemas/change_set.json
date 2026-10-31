@@ -319,6 +319,133 @@
       "title": "SetLayoutOptionChange",
       "type": "object"
     },
+    "SetLightingChange": {
+      "additionalProperties": false,
+      "description": "Change one lighting system. Fields left out keep their current value.\n\nrgblight takes brightness, effect, effect_speed, hue, saturation. backlight takes brightness,\neffect. vialrgb takes mode, speed, hue, saturation, value. `save` is required: true sends the\nfirmware's one save command, which persists all lighting; false lasts until the next power cycle.",
+      "properties": {
+        "brightness": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Brightness"
+        },
+        "effect": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effect"
+        },
+        "effect_speed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effect Speed"
+        },
+        "hue": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hue"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode"
+        },
+        "saturation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Saturation"
+        },
+        "save": {
+          "title": "Save",
+          "type": "boolean"
+        },
+        "speed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speed"
+        },
+        "system": {
+          "enum": [
+            "rgblight",
+            "backlight",
+            "vialrgb"
+          ],
+          "title": "System",
+          "type": "string"
+        },
+        "type": {
+          "const": "set_lighting",
+          "default": "set_lighting",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "system",
+        "save"
+      ],
+      "title": "SetLightingChange",
+      "type": "object"
+    },
     "SetMacroChange": {
       "additionalProperties": false,
       "description": "Replace one macro. `actions` holds [\"text\", \"abc\"], [\"tap\", \"KC_A\", ...], [\"down\", ...],\n[\"up\", ...] or [\"delay\", milliseconds]. An empty list clears the macro.",
@@ -501,6 +628,7 @@
             "set_key": "#/$defs/SetKeyChange",
             "set_key_override": "#/$defs/SetKeyOverrideChange",
             "set_layout_option": "#/$defs/SetLayoutOptionChange",
+            "set_lighting": "#/$defs/SetLightingChange",
             "set_macro": "#/$defs/SetMacroChange",
             "set_qmk_setting": "#/$defs/SetQmkSettingChange",
             "set_tap_dance": "#/$defs/SetTapDanceChange"
@@ -534,6 +662,9 @@
           },
           {
             "$ref": "#/$defs/SetMacroChange"
+          },
+          {
+            "$ref": "#/$defs/SetLightingChange"
           }
         ]
       },

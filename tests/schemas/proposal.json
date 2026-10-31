@@ -537,6 +537,52 @@
       "title": "SetLayoutOptionsOperation",
       "type": "object"
     },
+    "SetLightingOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "After",
+          "type": "object"
+        },
+        "before": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Before",
+          "type": "object"
+        },
+        "save": {
+          "title": "Save",
+          "type": "boolean"
+        },
+        "system": {
+          "enum": [
+            "rgblight",
+            "backlight",
+            "vialrgb"
+          ],
+          "title": "System",
+          "type": "string"
+        },
+        "type": {
+          "const": "set_lighting",
+          "default": "set_lighting",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "before",
+        "after",
+        "save"
+      ],
+      "title": "SetLightingOperation",
+      "type": "object"
+    },
     "SetMacrosOperation": {
       "additionalProperties": false,
       "description": "Macros are one firmware buffer, written whole. Contents are removed from default output.",
@@ -763,6 +809,7 @@
             "set_key": "#/$defs/SetKeyOperation",
             "set_key_override": "#/$defs/SetKeyOverrideOperation",
             "set_layout_options": "#/$defs/SetLayoutOptionsOperation",
+            "set_lighting": "#/$defs/SetLightingOperation",
             "set_macros": "#/$defs/SetMacrosOperation",
             "set_qmk_setting": "#/$defs/SetQmkSettingOperation",
             "set_tap_dance": "#/$defs/SetTapDanceOperation"
@@ -796,6 +843,9 @@
           },
           {
             "$ref": "#/$defs/SetMacrosOperation"
+          },
+          {
+            "$ref": "#/$defs/SetLightingOperation"
           }
         ]
       },

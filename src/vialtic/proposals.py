@@ -11,7 +11,7 @@ from . import vial_adapter as va
 from .device import Session, canonical_json
 from .errors import VialticError
 from .models import (
-    AltRepeatKeyValue, Baseline, Change, MacroChangeSummary, SetMacroChange, SetMacrosOperation, ComboValue, Configuration, KeyOverrideValue, SetAltRepeatKeyChange,
+    AltRepeatKeyValue, Baseline, Change, SetLightingChange, SetLightingOperation, MacroChangeSummary, SetMacroChange, SetMacrosOperation, ComboValue, Configuration, KeyOverrideValue, SetAltRepeatKeyChange,
     SetAltRepeatKeyOperation, SetComboChange, SetComboOperation, SetKeyOverrideChange, SetKeyOverrideOperation, SetQmkSettingChange, SetQmkSettingOperation,
     TapDanceValue, DeviceIdentity, KeycodeValue, KeymapEntry, EncoderEntry, Operation, Proposal,
     ProposalType, ProposalUnlock, SetEncoderChange, SetEncoderOperation, SetKeyChange, SetKeyOperation,
@@ -30,15 +30,29 @@ RECOVERY_TEXT = ("Everything Vialtic can read from the keyboard is saved before 
                  "within the reconnect window, without further approval. If it cannot, the backup is kept and the exact "
                  "recovery command is reported.")
 
+LIGHTING_SAVED_NOTE = ("The firmware has one save command for all lighting and cannot report saved values. Any other unsaved "
+                       "lighting is saved too, the save itself cannot be verified, and undo can only restore the values read "
+                       "just before this write, saving them again.")
+LIGHTING_TRANSIENT_NOTE = "This lighting change is not saved: it lasts until the keyboard next loses power."
+
 FAMILY_OF_OPERATION = {"set_key": "keymap", "set_encoder": "encoders", "set_layout_options": "layout_options",
                        "set_tap_dance": "tap_dance", "set_combo": "combos", "set_key_override": "key_overrides",
-                       "set_alt_repeat_key": "alt_repeat_keys", "set_qmk_setting": "settings", "set_macros": "macros"}
+                       "set_alt_repeat_key": "alt_repeat_keys", "set_qmk_setting": "settings", "set_macros": "macros",
+                       "set_lighting": "lighting"}
 U8 = 0xFF
 U16 = 0xFFFF
 
 
 def _value(entry: KeymapEntry | EncoderEntry) -> KeycodeValue:
     return KeycodeValue(raw=entry.raw, keycode=entry.keycode, label=entry.label)
+
+
+def touches_lighting(operations: Iterable[Operation]) -> bool:
+    return any(op.type == "set_lighting" for op in operations)
+
+
+def saves_lighting(operations: Iterable[Operation]) -> bool:
+    return any(op.type == "set_lighting" and op.save for op in operations)
 
 
 def after_keycodes(op: Operation) -> list[KeycodeValue]:
@@ -83,6 +97,7 @@ class _Planner:
         self.layout_value: int | None = None
         self.settings_after: dict[int, int] = {}
         self.macro_edits: dict[int, bytes] = {}
+        self.lighting_saves: set[bool] = set()
 
     def _once(self, target: tuple, description: str) -> None:
         if target in self.seen:
@@ -283,6 +298,34 @@ class _Planner:
                 value = change.value
         self.settings_after[qsid] = value
 
+    def _set_lighting(self, change: SetLightingChange) -> None:
+        current = getattr(self.config.lighting, change.system)
+        _capability(current, "lighting", f"{change.system} lighting")
+        self._once(("lighting", change.system), f"{change.system} lighting")
+        fields = va.LIGHTING_FIELDS[change.system]
+        given = {name for name in type(change).model_fields if name not in ("type", "system", "save")
+                 and getattr(change, name) is not None}
+        if given - set(fields):
+            raise VialticError("invalid_request", f"{change.system} lighting has no {', '.join(sorted(given - set(fields)))}. "
+                                                  f"It takes: {', '.join(fields)}.")
+        before = {name: current[name] for name in fields}
+        limits = {"mode": U16}
+        if change.system == "vialrgb":
+            limits["value"] = current["maximum_brightness"]
+        after = {name: self._bounded(getattr(change, name), before[name], limits.get(name, U8), f"The {name} value")
+                 for name in fields}
+        if change.system == "vialrgb" and after["mode"] not in current["supported_effects"]:
+            raise VialticError("capability_unavailable", f"This keyboard's firmware does not support VialRGB effect {after['mode']}.",
+                               details={"family": "lighting", "supported_effects": current["supported_effects"]})
+        self.lighting_saves.add(change.save)
+        if len(self.lighting_saves) > 1:
+            raise VialticError("invalid_request", "The firmware has one save command for all lighting, so a request cannot "
+                                                  "save one lighting system and leave another transient.")
+        if after == before:
+            return self._skip(f"{change.system} lighting")
+        self.operations.append(SetLightingOperation(system=change.system, before=before, after=after, save=change.save))
+        self.warnings.append(LIGHTING_SAVED_NOTE if change.save else LIGHTING_TRANSIENT_NOTE)
+
     def _set_macro(self, change: SetMacroChange) -> None:
         _capability(self.kb.macro_count and self.kb.macro_memory, "macros", "macros")
         self._index(change.index, self.kb.macro_count, "Macro")
@@ -379,6 +422,9 @@ def describe_operation(op: Operation) -> str:
         return f"combo {op.index}: {keys[0]} => {op.before.output.keycode} -> {keys[1]} => {op.after.output.keycode}"
     if op.type == "set_qmk_setting":
         return f"QMK setting {op.qsid} ({op.title}): {op.before} -> {op.after}"
+    if op.type == "set_lighting":
+        changes = ", ".join(f"{name} {op.before[name]} -> {op.after[name]}" for name in op.after if op.before[name] != op.after[name])
+        return f"{op.system} lighting: {changes} ({'saved' if op.save else 'until power is lost'})"
     if op.type == "set_macros":
         which = ", ".join(str(item.index) for item in op.changed) or "none (only the raw buffer differs)"
         return f"macros {which}: buffer {op.before_used_bytes} -> {op.after_used_bytes} of {op.memory_bytes} bytes"
@@ -402,8 +448,17 @@ def _changed_fields(before: Any, after: Any) -> str:
 # Comparable state. Values are what each family reads back as: raw codes for keys and encoders,
 # canonical names for entries. Both come from upstream's lossless codec.
 
-def family_state(config: Configuration) -> dict[str, dict[str, Any]]:
-    return {
+def _lighting_state(config: Configuration) -> dict[str, dict[str, int]]:
+    """Values a write can set. The rest of a lighting read describes the firmware's limits."""
+    light = config.lighting
+    return {system: {name: getattr(light, system)[name] for name in fields}
+            for system, fields in va.LIGHTING_FIELDS.items() if getattr(light, system)}
+
+
+def family_state(config: Configuration, lighting: bool = False) -> dict[str, dict[str, Any]]:
+    """Lighting is only part of it when a write changes it: keys on the board change it at will."""
+    state = {} if not lighting else {"lighting": _lighting_state(config)}
+    return state | {
         "keymap": {f"{e.layer}:{e.row},{e.col}": e.raw for e in config.keymap},
         "encoders": {f"{e.layer}:{e.index}:{e.direction}": e.raw for e in config.encoders},
         "layout_options": {"value": config.layout_options},
@@ -436,6 +491,8 @@ def operation_effect(op: Operation) -> tuple[str, str, Any, Any]:
         return "settings", str(op.qsid), op.before, op.after
     if op.type == "set_macros":
         return "macros", "buffer", op.before_buffer_b64, op.after_buffer_b64
+    if op.type == "set_lighting":
+        return "lighting", op.system, op.before, op.after
     raise VialticError("unsupported_operation", f"Unknown operation type {op.type}.")
 
 
@@ -456,9 +513,12 @@ def restore_blockers(current: Configuration, target: Configuration) -> list[str]
     return blockers
 
 
-def restore_operations(current: Configuration, target: Configuration,
-                       vial_protocol: int | None = None) -> tuple[list[Operation], list[str], list[str]]:
-    """Operations turning current into target. Also returns unrestorable families and notes."""
+def restore_operations(current: Configuration, target: Configuration, vial_protocol: int | None = None,
+                       lighting_save: bool | None = None) -> tuple[list[Operation], list[str], list[str]]:
+    """Operations turning current into target. Also returns unrestorable families and notes.
+
+    `lighting_save` is None when lighting is not part of this restore, otherwise whether to save it.
+    """
     ops: list[Operation] = []
     now_keys = {(e.layer, e.row, e.col): e for e in current.keymap}
     for wanted in target.keymap:
@@ -507,14 +567,24 @@ def restore_operations(current: Configuration, target: Configuration,
         ops.append(macro_buffer_operation(base64.b64decode(current.macros.buffer_b64), base64.b64decode(target.macros.buffer_b64),
                                           target.macros.count, current.macros.memory_bytes, vial_protocol))
 
-    now_data, target_data = current.model_dump(mode="json"), target.model_dump(mode="json")
     notes = []
     moved = [key for key, raw in target.settings.unknown_raw.items() if current.settings.unknown_raw.get(key) not in (None, raw)]
     if moved:
         notes.append(f"QMK settings {moved} are not in the pinned Vial tables and changed since the backup. Vialtic cannot "
                      "restore them; use the software that changed them.")
-    if now_data["lighting"] != target_data["lighting"]:
-        notes.append("Lighting differs from the saved state and will not be restored: this build cannot write lighting yet.")
+    now_light, want_light = _lighting_state(current), _lighting_state(target)
+    if lighting_save is None:
+        if now_light != want_light:
+            notes.append("Lighting differs from the saved state and is not restored: the write being reversed did not change "
+                         "it, so the difference is likely lighting keys on the keyboard.")
+    elif set(want_light) - set(now_light):
+        blockers.append("lighting")
+    else:
+        for system, wanted in want_light.items():
+            if now_light[system] != wanted:
+                ops.append(SetLightingOperation(system=system, before=now_light[system], after=wanted, save=lighting_save))
+        if touches_lighting(ops):
+            notes.append(LIGHTING_SAVED_NOTE if lighting_save else LIGHTING_TRANSIENT_NOTE)
     return ops, blockers, notes
 
 
@@ -528,10 +598,11 @@ def build_proposal(proposal_type: ProposalType, device: DeviceIdentity, snapshot
                    operations: list[Operation], warnings: list[str], positions: list[tuple[int, int]],
                    now: datetime, ttl: timedelta, reconnect_window: float) -> Proposal:
     required = requires_unlock(operations)
+    # A proposal that writes lighting must notice it moved; one that does not must not care.
+    checked = list(va.CHECKED_FAMILIES) + (["lighting"] if touches_lighting(operations) else [])
     fields = dict(
         schema_version=1, kind="proposal", proposal_type=proposal_type, device=device,
-        baseline=Baseline(family_fingerprints={f: snapshot.family_fingerprints[f] for f in va.CHECKED_FAMILIES},
-                          checked_families=list(va.CHECKED_FAMILIES)),
+        baseline=Baseline(family_fingerprints={f: snapshot.family_fingerprints[f] for f in checked}, checked_families=checked),
         operations=operations, affected=affected_families(operations), warnings=warnings,
         unlock=ProposalUnlock(required=required,
                               positions=[UnlockPosition(row=r, col=c) for r, c in positions] if required else []),
@@ -553,15 +624,6 @@ def check_integrity(proposal: Proposal) -> None:
                            next_steps=["Create a new proposal and get it approved."])
 
 
-def expected_after(baseline: Configuration, operations: Iterable[Operation]) -> dict[str, dict[str, Any]]:
-    """The values each family must hold once operations are applied."""
-    state = family_state(baseline)
-    for op in operations:
-        family, target, _, after = operation_effect(op)
-        state.setdefault(family, {})[target] = after
-    return state
-
-
 def unexplained_values(baseline: Configuration, operations: Iterable[Operation],
                        observed: Configuration) -> list[VerificationDifference]:
     """Values neither the baseline nor this write can account for.
@@ -574,7 +636,8 @@ def unexplained_values(baseline: Configuration, operations: Iterable[Operation],
                for family, values in family_state(baseline).items()}
     for op in operations:
         family, target, before, after = operation_effect(op)
-        allowed.setdefault(family, {}).setdefault(target, []).extend([before, after])
+        if family != "lighting":
+            allowed.setdefault(family, {}).setdefault(target, []).extend([before, after])
     state = family_state(observed)
     # A macro write goes out in chunks, so an interrupted one can leave any mix of old and new.
     # The other families still identify the keyboard.
@@ -586,10 +649,15 @@ def unexplained_values(baseline: Configuration, operations: Iterable[Operation],
 
 
 def compare_state(baseline: Configuration, operations: Iterable[Operation], observed: Configuration,
-                  skip_families: Iterable[str] = ()) -> list[VerificationDifference]:
+                  skip_families: Iterable[str] = (), check_lighting: bool = False) -> list[VerificationDifference]:
     """Differences between the observed configuration and baseline plus operations."""
-    expected = expected_after(baseline, operations)
-    seen = family_state(observed)
+    operations = list(operations)
+    check_lighting = check_lighting or touches_lighting(operations)
+    expected = family_state(baseline, lighting=check_lighting)
+    for op in operations:
+        family, target, _, after = operation_effect(op)
+        expected[family][target] = after
+    seen = family_state(observed, lighting=check_lighting)
     diffs: list[VerificationDifference] = []
     for family, values in expected.items():
         if family in skip_families:

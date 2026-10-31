@@ -11,7 +11,7 @@ from vialtic.emulator import Faults
 from vialtic.errors import VialticError
 from vialtic.models import (
     ChangeSet, SetAltRepeatKeyChange, SetComboChange, SetKeyChange, SetKeyOverrideChange, SetLayoutOptionChange,
-    SetMacroChange, SetQmkSettingChange, SetTapDanceChange,
+    SetLightingChange, SetMacroChange, SetQmkSettingChange, SetTapDanceChange,
 )
 from vialtic.service import attestation_for
 
@@ -672,3 +672,158 @@ def test_macro_files_are_owner_only(tmp_path):
     assert path.stat().st_mode & 0o777 == 0o600
     rig.apply(proposal)
     assert rig.store.previous_path(proposal.device.binding_id).stat().st_mode & 0o777 == 0o600
+
+
+# Lighting.
+
+def _light(rig):
+    return dict(firmware(rig).state["lighting"])
+
+
+def _saved(rig):
+    return dict(firmware(rig).state["lighting_saved"])
+
+
+@pytest.mark.parametrize("scenario, change, key, value", [
+    ("generic", dict(system="vialrgb", mode=3, speed=7, hue=1, saturation=2, value=64), "mode", 3),
+    ("split", dict(system="rgblight", brightness=9, effect=2, effect_speed=3, hue=4, saturation=5), "rgb_brightness", 9),
+    ("legacy", dict(system="backlight", brightness=9, effect=1), "bl_brightness", 9),
+    ("dual", dict(system="rgblight", hue=200), "rgb_h", 200),
+    ("dual", dict(system="backlight", effect=3), "bl_effect", 3),
+])
+def test_lighting_cycle_transient(tmp_path, scenario, change, key, value):
+    rig = Rig(tmp_path, scenario)
+    proposal = plan(rig, SetLightingChange(save=False, **change))
+    assert "lighting" in proposal.baseline.checked_families
+    assert any("not saved" in w for w in proposal.warnings)
+    before = _light(rig)
+    check_family_cycle(rig, proposal, lambda: _light(rig), "lighting")
+    assert _light(rig) == before and _saved(rig) == before, "a transient change never saves"
+    rig.apply(plan(rig, SetLightingChange(save=False, **change)))
+    assert _light(rig)[key] == value and _saved(rig)[key] != value
+    firmware(rig).power_cycle()
+    assert _light(rig)[key] != value
+
+
+def test_lighting_save_survives_a_power_cycle_and_undo_saves_too(tmp_path):
+    rig = Rig(tmp_path, "split")
+    proposal = plan(rig, SetLightingChange(system="rgblight", save=True, brightness=9))
+    assert any("one save command" in w for w in proposal.warnings)
+    result = rig.apply(proposal)
+    assert result.outcome == "verified" and any("cannot report" in w for w in result.warnings)
+    assert _saved(rig)["rgb_brightness"] == 9
+    firmware(rig).power_cycle()
+    assert _light(rig)["rgb_brightness"] == 9
+    undo_plan = rig.service.create_undo_proposal(None)
+    assert undo_plan.operations[0].save is True
+    assert rig.apply(undo_plan).outcome == "verified"
+    assert _saved(rig)["rgb_brightness"] == 128
+    firmware(rig).power_cycle()
+    assert _light(rig)["rgb_brightness"] == 128
+
+
+def test_lighting_is_saved_only_after_verification(tmp_path):
+    rig = Rig(tmp_path, "split", Faults(drop_writes_after=0))
+    result = rig.apply(plan(rig, SetLightingChange(system="rgblight", save=True, effect=9)))
+    assert result.outcome != "verified" and _saved(rig)["rgb_effect"] == 1
+
+
+def test_lighting_clamped_by_firmware_does_not_verify_and_is_restored(tmp_path):
+    rig = Rig(tmp_path, "generic")
+    fw = firmware(rig)
+    original = fw._lighting_set
+
+    def limited(msg):
+        original(msg)
+        fw.state["lighting"]["v"] = min(fw.state["lighting"]["v"], 10)
+
+    fw._lighting_set = limited
+    result = rig.apply(plan(rig, SetLightingChange(system="vialrgb", save=True, value=100)))
+    assert result.outcome != "verified" and any(d.family == "lighting" for d in result.differences)
+    assert fw.state["lighting_saved"]["v"] == 64, "the wrong value was never saved"
+
+
+def test_lighting_stale_only_when_the_proposal_writes_it(tmp_path):
+    rig = Rig(tmp_path, "split")
+    lighting = plan(rig, SetLightingChange(system="rgblight", save=False, brightness=9))
+    keymap = rig.plan((1, 0, 2, "KC_A"))
+    assert "lighting" not in keymap.baseline.checked_families
+    firmware(rig).state["lighting"]["rgb_effect"] = 77  # someone pressed a lighting key
+    with pytest.raises(VialticError) as error:
+        rig.apply(lighting)
+    assert error.value.code == "proposal_stale" and error.value.details["changed_families"] == ["lighting"]
+    assert rig.apply(keymap).outcome == "verified"
+
+
+def test_lighting_keys_during_a_keymap_write_are_not_a_failure(tmp_path):
+    rig = Rig(tmp_path, "split")
+    proposal = rig.plan((1, 0, 2, "KC_A"))
+    original = rig.service._write_operation
+
+    def pressed(session, op):
+        original(session, op)
+        firmware(rig).state["lighting"]["rgb_effect"] = 77
+
+    rig.service._write_operation = staticmethod(pressed)
+    assert rig.apply(proposal).outcome == "verified"
+    assert _light(rig)["rgb_effect"] == 77
+
+
+def test_undo_of_a_keymap_write_leaves_lighting_keys_alone(tmp_path):
+    rig = Rig(tmp_path, "split")
+    rig.apply(rig.plan((1, 0, 2, "KC_A")))
+    firmware(rig).state["lighting"]["rgb_effect"] = 77
+    undo_plan = rig.service.create_undo_proposal(None)
+    assert undo_plan.affected == ["keymap"] and any("Lighting differs" in w for w in undo_plan.warnings)
+    assert rig.apply(undo_plan).outcome == "verified" and _light(rig)["rgb_effect"] == 77
+
+
+def test_lighting_failure_restores_values_and_saves_them_again(tmp_path):
+    rig = Rig(tmp_path, "split")
+    proposal = plan(rig, SetLightingChange(system="rgblight", save=True, brightness=9))
+    fw = firmware(rig)
+    packets = []
+
+    def fails_on_save(msg):
+        if msg[0] == 0x09 and not packets:
+            packets.append(msg)
+            fw.state["lighting_saved"] = dict(fw.state["lighting"])  # it reached the firmware, the answer was lost
+            raise OSError("device disconnected")
+
+    rig.backend.packet_hook = fails_on_save
+    result = rig.apply(proposal)
+    assert result.outcome == "failed_restored" and _light(rig)["rgb_brightness"] == 128
+    assert _saved(rig)["rgb_brightness"] == 128
+
+
+@pytest.mark.parametrize("scenario, change, code", [
+    ("generic", dict(system="rgblight", brightness=1), "capability_unavailable"),
+    ("split", dict(system="vialrgb", mode=1), "capability_unavailable"),
+    ("split", dict(system="backlight", brightness=1), "capability_unavailable"),
+    ("minimal", dict(system="rgblight", brightness=1), "capability_unavailable"),
+    ("generic", dict(system="vialrgb", mode=99), "capability_unavailable"),
+    ("generic", dict(system="vialrgb", value=129), "invalid_request"),
+    ("generic", dict(system="vialrgb", hue=256), "invalid_request"),
+    ("generic", dict(system="vialrgb", brightness=1), "invalid_request"),
+    ("split", dict(system="rgblight", brightness=256), "invalid_request"),
+    ("split", dict(system="rgblight", mode=1), "invalid_request"),
+])
+def test_lighting_bounds(tmp_path, scenario, change, code):
+    refused(Rig(tmp_path, scenario), code, SetLightingChange(save=False, **change))
+
+
+def test_lighting_save_requires_a_decision():
+    with pytest.raises(ValueError):
+        SetLightingChange(system="rgblight", brightness=1)
+
+
+def test_lighting_cannot_mix_saved_and_transient(tmp_path):
+    refused(Rig(tmp_path, "dual"), "invalid_request", SetLightingChange(system="rgblight", save=True, hue=1),
+            SetLightingChange(system="backlight", save=False, effect=1))
+
+
+def test_writable_operations_follow_the_device(tmp_path):
+    caps = full(tmp_path).service.read_snapshot().capabilities.writable_operations
+    assert set(caps) == {"set_key", "set_encoder", "set_layout_option", "set_tap_dance", "set_combo", "set_key_override",
+                         "set_alt_repeat_key", "set_qmk_setting", "set_macro", "set_lighting"}
+    assert Rig(tmp_path / "m", "minimal").service.read_snapshot().capabilities.writable_operations == ["set_key"]

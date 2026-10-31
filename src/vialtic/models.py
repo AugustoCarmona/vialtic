@@ -327,8 +327,32 @@ class SetMacroChange(Model):
     actions: list[list[Any]] = Field(max_length=4096)
 
 
+LightingSystem = Literal["rgblight", "backlight", "vialrgb"]
+
+
+class SetLightingChange(Model):
+    """Change one lighting system. Fields left out keep their current value.
+
+    rgblight takes brightness, effect, effect_speed, hue, saturation. backlight takes brightness,
+    effect. vialrgb takes mode, speed, hue, saturation, value. `save` is required: true sends the
+    firmware's one save command, which persists all lighting; false lasts until the next power cycle.
+    """
+
+    type: Literal["set_lighting"] = "set_lighting"
+    system: LightingSystem
+    save: bool
+    brightness: int | None = None
+    effect: int | None = None
+    effect_speed: int | None = None
+    hue: int | None = None
+    saturation: int | None = None
+    mode: int | None = None
+    speed: int | None = None
+    value: int | None = None
+
+
 Change = Annotated[Union[SetKeyChange, SetEncoderChange, SetLayoutOptionChange, SetTapDanceChange, SetComboChange,
-                         SetKeyOverrideChange, SetAltRepeatKeyChange, SetQmkSettingChange, SetMacroChange],
+                         SetKeyOverrideChange, SetAltRepeatKeyChange, SetQmkSettingChange, SetMacroChange, SetLightingChange],
                    Field(discriminator="type")]
 
 
@@ -455,9 +479,17 @@ class SetMacrosOperation(Model):
     redacted: bool = False
 
 
+class SetLightingOperation(Model):
+    type: Literal["set_lighting"] = "set_lighting"
+    system: LightingSystem
+    before: dict[str, int]
+    after: dict[str, int]
+    save: bool
+
+
 Operation = Annotated[Union[SetKeyOperation, SetEncoderOperation, SetLayoutOptionsOperation, SetTapDanceOperation,
                             SetComboOperation, SetKeyOverrideOperation, SetAltRepeatKeyOperation, SetQmkSettingOperation,
-                            SetMacrosOperation],
+                            SetMacrosOperation, SetLightingOperation],
                       Field(discriminator="type")]
 
 
