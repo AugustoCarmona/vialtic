@@ -4,6 +4,8 @@ Last updated: 2026-10-30.
 
 ## Actual state
 
+- Added the owner-provided walking turtle mascot from `vialtic-web-kit.zip` to the end of README.md, after Freedom and attribution. Verified PNG integrity, README asset reference and `git diff --check`; no runtime or hardware behavior changed.
+
 - Product interview complete and accepted decisions recorded in SPEC.md.
 - Agent entrypoint, plan, install contract, Windows guide and upstream review written.
 - This checkout originates from Vial Web; its application source/build scripts remain unchanged. The inherited `.github/workflows/main.yml` web-build CI was removed at the owner’s request because it does not validate Vialtic. Python CI will be introduced during implementation. It is not a working Vialtic application.

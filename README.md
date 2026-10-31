@@ -39,3 +39,7 @@ For installation after releases exist, the same repository will direct agents to
 ## Freedom and attribution
 
 New Vialtic code will use GPL-2.0-or-later. Preserve upstream notices and licenses for all reused material. Vialtic is based on [Vial](https://github.com/vial-kb/vial-gui); this checkout originated from [Vial Web](https://github.com/vial-kb/vial-web). See [COPYING](COPYING) and [upstream provenance](docs/UPSTREAM.md).
+
+<p align="center">
+  <img src="assets/mascot/turtle-walking.png" alt="The Vialtic turtle walking to the right" width="320">
+</p>
